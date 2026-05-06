@@ -3,9 +3,52 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../services/api.js';
 
 const POLL_MS = 4000;
+const MESSAGE_PREFIX = 'WA_MSG:';
+const LEGACY_MEDIA_PREFIX = 'WA_MEDIA:';
+
+function parseMessageContent(rawContent) {
+  if (typeof rawContent !== 'string') {
+    return { kind: 'text', text: '' };
+  }
+  if (rawContent.startsWith(LEGACY_MEDIA_PREFIX)) {
+    try {
+      const parsed = JSON.parse(rawContent.slice(LEGACY_MEDIA_PREFIX.length));
+      if (parsed?.kind) return parsed;
+    } catch {
+      // Continue to other parsing paths.
+    }
+  }
+  if (!rawContent.startsWith(MESSAGE_PREFIX)) {
+    return { kind: 'text', text: rawContent };
+  }
+  try {
+    const parsed = JSON.parse(rawContent.slice(MESSAGE_PREFIX.length));
+    if (parsed?.kind) return parsed;
+  } catch {
+    // Fallback to plain text if older/bad payload is present.
+  }
+  return { kind: 'text', text: rawContent };
+}
 
 function previewText(content, max = 72) {
-  const oneLine = (content || '').replace(/\s+/g, ' ').trim();
+  const parsed = parseMessageContent(content);
+  if (parsed.kind === 'image') {
+    return parsed.caption ? `Image: ${parsed.caption}` : 'Image';
+  }
+  if (parsed.kind === 'audio') return 'Audio';
+  if (parsed.kind === 'video') return parsed.caption ? `Video: ${parsed.caption}` : 'Video';
+  if (parsed.kind === 'document') return parsed.filename ? `Document: ${parsed.filename}` : 'Document';
+  if (parsed.kind === 'sticker') return 'Sticker';
+  if (parsed.kind === 'location') return 'Location';
+  if (parsed.kind === 'contacts') return 'Contact card';
+  if (parsed.kind === 'button') return parsed.text ? `Button: ${parsed.text}` : 'Button reply';
+  if (parsed.kind === 'interactive') return 'Interactive reply';
+  if (parsed.kind === 'reaction') return parsed.emoji ? `Reaction: ${parsed.emoji}` : 'Reaction';
+  if (typeof parsed.raw === 'string') {
+    const oneLineRaw = parsed.raw.replace(/\s+/g, ' ').trim();
+    return oneLineRaw.length <= max ? oneLineRaw : `${oneLineRaw.slice(0, max)}…`;
+  }
+  const oneLine = (parsed.text || '').replace(/\s+/g, ' ').trim();
   if (oneLine.length <= max) return oneLine;
   return `${oneLine.slice(0, max)}…`;
 }
@@ -41,9 +84,11 @@ export default function Conversations() {
   const [error, setError] = useState('');
   const [loadingSend, setLoadingSend] = useState(false);
   const [loadingThreads, setLoadingThreads] = useState(true);
+  const [mediaUrls, setMediaUrls] = useState({});
 
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
+  const mediaUrlRefs = useRef({});
 
   const selected = useMemo(
     () => threads.find((t) => t.id === selectedId) || null,
@@ -122,6 +167,56 @@ export default function Conversations() {
     return () => clearInterval(t);
   }, [loadThreads, loadMessages, selectedId]);
 
+  useEffect(() => {
+    const mediaIds = messages
+      .map((m) => parseMessageContent(m.content))
+      .filter((c) => ['image', 'audio', 'video', 'document', 'sticker'].includes(c.kind) && c.mediaId)
+      .map((c) => c.mediaId);
+
+    const existing = mediaUrlRefs.current;
+    const needed = new Set(mediaIds);
+
+    Object.entries(existing).forEach(([mediaId, objectUrl]) => {
+      if (!needed.has(mediaId)) {
+        URL.revokeObjectURL(objectUrl);
+        delete existing[mediaId];
+      }
+    });
+
+    const missing = mediaIds.filter((id) => !existing[id]);
+    if (!missing.length) {
+      setMediaUrls({ ...existing });
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      for (const mediaId of missing) {
+        try {
+          const res = await api.get(`/dashboard/messages/media/${mediaId}`, {
+            responseType: 'blob',
+          });
+          if (cancelled) return;
+          existing[mediaId] = URL.createObjectURL(res.data);
+        } catch {
+          // Keep chat usable even if media fetch fails.
+        }
+      }
+      if (!cancelled) setMediaUrls({ ...existing });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(mediaUrlRefs.current).forEach((u) => URL.revokeObjectURL(u));
+      mediaUrlRefs.current = {};
+    };
+  }, []);
+
   function selectCustomer(id) {
     setSelectedId(id);
     const next = new URLSearchParams(searchParams);
@@ -160,7 +255,7 @@ export default function Conversations() {
         </div>
       )}
 
-      <div className="grid md:grid-cols-5 gap-4 min-h-[min(720px,calc(100vh-12rem))]">
+      <div className="grid md:grid-cols-5 gap-4 h-[min(720px,calc(100vh-12rem))]">
         <div className="md:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm flex flex-col">
           <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 space-y-2">
             <div className="font-semibold text-sm text-slate-900 dark:text-white">Inbox</div>
@@ -257,7 +352,140 @@ export default function Conversations() {
                     >
                       {meta.label}
                     </div>
-                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    {(() => {
+                      const parsed = parseMessageContent(m.content);
+                      const mediaSrc = parsed.mediaId ? mediaUrls[parsed.mediaId] : '';
+
+                      if (parsed.kind === 'image') {
+                        return (
+                          <div className="space-y-2">
+                            {mediaSrc ? (
+                              <img
+                                src={mediaSrc}
+                                alt={parsed.caption || 'Customer image'}
+                                className="max-h-72 rounded-xl border border-slate-200 dark:border-slate-700 object-contain bg-black/5"
+                              />
+                            ) : (
+                              <div className="text-xs opacity-80">Loading image…</div>
+                            )}
+                            {parsed.caption ? (
+                              <div className="whitespace-pre-wrap break-words">{parsed.caption}</div>
+                            ) : null}
+                          </div>
+                        );
+                      }
+                      if (parsed.kind === 'audio') {
+                        return (
+                          <div className="space-y-2">
+                            {mediaSrc ? (
+                              <audio controls src={mediaSrc} className="max-w-full" />
+                            ) : (
+                              <div className="text-xs opacity-80">Loading audio…</div>
+                            )}
+                            {parsed.voice ? <div className="text-xs opacity-70">Voice note</div> : null}
+                          </div>
+                        );
+                      }
+                      if (parsed.kind === 'video') {
+                        return (
+                          <div className="space-y-2">
+                            {mediaSrc ? (
+                              <video controls src={mediaSrc} className="max-h-72 rounded-xl max-w-full bg-black" />
+                            ) : (
+                              <div className="text-xs opacity-80">Loading video…</div>
+                            )}
+                            {parsed.caption ? (
+                              <div className="whitespace-pre-wrap break-words">{parsed.caption}</div>
+                            ) : null}
+                          </div>
+                        );
+                      }
+                      if (parsed.kind === 'document') {
+                        return (
+                          <div className="space-y-1">
+                            <div className="font-medium">{parsed.filename || 'Document'}</div>
+                            {mediaSrc ? (
+                              <a
+                                href={mediaSrc}
+                                download={parsed.filename || 'document'}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline text-sm"
+                              >
+                                Open / Download
+                              </a>
+                            ) : (
+                              <div className="text-xs opacity-80">Loading document…</div>
+                            )}
+                            {parsed.caption ? (
+                              <div className="whitespace-pre-wrap break-words">{parsed.caption}</div>
+                            ) : null}
+                          </div>
+                        );
+                      }
+                      if (parsed.kind === 'sticker') {
+                        return mediaSrc ? (
+                          <img
+                            src={mediaSrc}
+                            alt="Sticker"
+                            className="max-h-56 max-w-56 rounded-xl object-contain bg-black/5"
+                          />
+                        ) : (
+                          <div className="text-xs opacity-80">Loading sticker…</div>
+                        );
+                      }
+                      if (parsed.kind === 'location') {
+                        const lat = parsed.latitude;
+                        const lng = parsed.longitude;
+                        const mapUrl =
+                          Number.isFinite(lat) && Number.isFinite(lng)
+                            ? `https://maps.google.com/?q=${lat},${lng}`
+                            : '';
+                        return (
+                          <div className="space-y-1">
+                            <div>{parsed.name || 'Location'}</div>
+                            {parsed.address ? <div className="text-xs opacity-80">{parsed.address}</div> : null}
+                            {mapUrl ? (
+                              <a href={mapUrl} target="_blank" rel="noreferrer" className="underline text-sm">
+                                Open in maps
+                              </a>
+                            ) : null}
+                          </div>
+                        );
+                      }
+                      if (parsed.kind === 'contacts') {
+                        const contacts = Array.isArray(parsed.contacts) ? parsed.contacts : [];
+                        return (
+                          <div className="space-y-1">
+                            <div>Contact card{contacts.length > 1 ? 's' : ''}</div>
+                            <div className="text-xs opacity-80">
+                              {contacts
+                                .map((c) => c?.name?.formatted_name || c?.name?.first_name || 'Contact')
+                                .join(', ')}
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (parsed.kind === 'button') {
+                        return (
+                          <div className="whitespace-pre-wrap break-words">
+                            {parsed.text || parsed.payload || 'Button reply'}
+                          </div>
+                        );
+                      }
+                      if (parsed.kind === 'interactive') {
+                        const label =
+                          parsed.buttonReply?.title ||
+                          parsed.listReply?.title ||
+                          parsed.nfmReply?.body ||
+                          'Interactive reply';
+                        return <div className="whitespace-pre-wrap break-words">{label}</div>;
+                      }
+                      if (parsed.kind === 'reaction') {
+                        return <div className="text-2xl leading-none">{parsed.emoji || 'Reaction'}</div>;
+                      }
+                      return <div className="whitespace-pre-wrap break-words">{parsed.text}</div>;
+                    })()}
                     <div
                       className={[
                         'text-[10px] mt-1 opacity-70',

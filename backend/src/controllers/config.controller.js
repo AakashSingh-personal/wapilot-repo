@@ -1,5 +1,40 @@
 import { prisma } from '../lib/prisma.js';
 
+function parseCatalog(value) {
+  if (Array.isArray(value)) {
+    return { services: value, products: [], clientDetails: '' };
+  }
+  if (value && typeof value === 'object') {
+    return {
+      services: Array.isArray(value.services) ? value.services : [],
+      products: Array.isArray(value.products) ? value.products : [],
+      clientDetails: typeof value.clientDetails === 'string' ? value.clientDetails : '',
+    };
+  }
+  return { services: [], products: [], clientDetails: '' };
+}
+
+function mergeCatalog(existingValue, incoming) {
+  const current = parseCatalog(existingValue);
+  if (incoming.services != null) current.services = incoming.services;
+  if (incoming.products != null) current.products = incoming.products;
+  if (incoming.clientDetails !== undefined) {
+    current.clientDetails = incoming.clientDetails == null ? '' : String(incoming.clientDetails);
+  }
+  return current;
+}
+
+function serializeConfig(config) {
+  if (!config) return config;
+  const catalog = parseCatalog(config.services);
+  return {
+    ...config,
+    services: catalog.services,
+    products: catalog.products,
+    clientDetails: catalog.clientDetails,
+  };
+}
+
 export async function getConfig(req, res, next) {
   try {
     const business = await prisma.business.findUnique({
@@ -8,7 +43,7 @@ export async function getConfig(req, res, next) {
     });
     res.json({
       business: { id: business.id, name: business.name, phoneNumberId: business.phoneNumberId },
-      config: business.config,
+      config: serializeConfig(business.config),
     });
   } catch (e) {
     next(e);
@@ -17,7 +52,7 @@ export async function getConfig(req, res, next) {
 
 export async function updateConfig(req, res, next) {
   try {
-    const { businessName, services, workingHours, autoReplyEnabled, upiId, phoneNumberId } =
+    const { businessName, services, products, clientDetails, workingHours, autoReplyEnabled, upiId, phoneNumberId } =
       req.body || {};
 
     await prisma.$transaction(async (tx) => {
@@ -38,7 +73,13 @@ export async function updateConfig(req, res, next) {
       }
 
       const cfgData = {};
-      if (services != null) cfgData.services = services;
+      if (services != null || products != null || clientDetails !== undefined) {
+        const existing = await tx.businessConfig.findUnique({
+          where: { businessId: req.user.businessId },
+          select: { services: true },
+        });
+        cfgData.services = mergeCatalog(existing?.services, { services, products, clientDetails });
+      }
       if (workingHours != null) cfgData.workingHours = workingHours;
       if (autoReplyEnabled != null) cfgData.autoReplyEnabled = Boolean(autoReplyEnabled);
       if (upiId !== undefined) cfgData.upiId = upiId;
@@ -48,7 +89,7 @@ export async function updateConfig(req, res, next) {
           where: { businessId: req.user.businessId },
           create: {
             businessId: req.user.businessId,
-            services: services ?? [],
+            services: mergeCatalog(null, { services, products, clientDetails }),
             workingHours: typeof workingHours === 'string' ? workingHours : JSON.stringify({ slots: ['3 PM', '5 PM'] }),
             autoReplyEnabled: autoReplyEnabled ?? true,
             upiId: upiId ?? null,
@@ -64,7 +105,7 @@ export async function updateConfig(req, res, next) {
     });
     res.json({
       business: { id: fresh.id, name: fresh.name, phoneNumberId: fresh.phoneNumberId },
-      config: fresh.config,
+      config: serializeConfig(fresh.config),
     });
   } catch (e) {
     next(e);

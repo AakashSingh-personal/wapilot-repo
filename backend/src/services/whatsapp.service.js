@@ -103,3 +103,33 @@ export async function sendWhatsAppImageFromBuffer({ phoneNumberId, toPhoneE164, 
     }
   }
 }
+
+/**
+ * Fetch media bytes for an inbound WhatsApp media id.
+ */
+export async function fetchWhatsAppMediaById(mediaId) {
+  const t = token();
+  if (!t || !mediaId) {
+    throw new Error('Missing WhatsApp token or media id');
+  }
+
+  const metaUrl = `${GRAPH}/${mediaId}`;
+  const meta = await axios.get(metaUrl, {
+    headers: { Authorization: `Bearer ${t}` },
+  });
+
+  const downloadUrl = meta.data?.url;
+  if (!downloadUrl) {
+    throw new Error('WhatsApp media url missing');
+  }
+
+  const fileRes = await axios.get(downloadUrl, {
+    headers: { Authorization: `Bearer ${t}` },
+    responseType: 'arraybuffer',
+  });
+
+  return {
+    buffer: Buffer.from(fileRes.data),
+    mimeType: meta.data?.mime_type || fileRes.headers['content-type'] || 'application/octet-stream',
+  };
+}

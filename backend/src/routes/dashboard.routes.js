@@ -11,6 +11,7 @@ router.get('/conversations', dashboardController.listConversations);
 router.get('/customers', dashboardController.listCustomers);
 router.get('/leads', dashboardController.listLeads);
 router.get('/messages/:customerId', dashboardController.messagesForCustomer);
+router.get('/messages/media/:mediaId', dashboardController.whatsappMedia);
 router.get('/bookings', dashboardController.listBookings);
 router.get('/payments', dashboardController.listPayments);
 

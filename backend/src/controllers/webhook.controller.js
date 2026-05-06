@@ -33,15 +33,137 @@ export async function receiveWebhook(req, res) {
         const contactName = contacts[0]?.profile?.name;
 
         for (const msg of messages) {
-          if (msg.type !== 'text') continue;
-          const textBody = msg.text?.body;
           const from = msg.from;
-          if (!textBody || !from) continue;
+          if (!from) continue;
 
-          await webhookService.handleInboundText({
+          if (msg.type === 'text') {
+            const textBody = msg.text?.body;
+            if (!textBody) continue;
+            await webhookService.handleInboundText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              textBody,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'image') {
+            await webhookService.handleInboundImage({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              mediaId: msg.image?.id,
+              caption: msg.image?.caption,
+              mimeType: msg.image?.mime_type,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'audio') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'audio',
+              msgPayload: msg.audio,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'video') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'video',
+              msgPayload: msg.video,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'document') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'document',
+              msgPayload: msg.document,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'sticker') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'sticker',
+              msgPayload: msg.sticker,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'location') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'location',
+              msgPayload: msg.location,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'contacts') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'contacts',
+              msgPayload: msg.contacts,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'button') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'button',
+              msgPayload: msg.button,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'interactive') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'interactive',
+              msgPayload: msg.interactive,
+              contactName,
+            });
+            continue;
+          }
+
+          if (msg.type === 'reaction') {
+            await webhookService.handleInboundNonText({
+              phoneNumberId: phoneNumberId || undefined,
+              fromWaId: from,
+              msgType: 'reaction',
+              msgPayload: msg.reaction,
+              contactName,
+            });
+            continue;
+          }
+
+          await webhookService.handleInboundNonText({
             phoneNumberId: phoneNumberId || undefined,
             fromWaId: from,
-            textBody,
+            msgType: msg.type || 'unknown',
+            msgPayload: msg[msg.type] || msg,
             contactName,
           });
         }

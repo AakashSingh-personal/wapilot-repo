@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma.js';
+import { fetchWhatsAppMediaById } from '../services/whatsapp.service.js';
 
 export async function stats(req, res, next) {
   try {
@@ -131,6 +132,18 @@ export async function messagesForCustomer(req, res, next) {
       orderBy: { createdAt: 'asc' },
     });
     res.json(messages);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function whatsappMedia(req, res, next) {
+  try {
+    const { mediaId } = req.params;
+    const { buffer, mimeType } = await fetchWhatsAppMediaById(mediaId);
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(buffer);
   } catch (e) {
     next(e);
   }

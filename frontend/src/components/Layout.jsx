@@ -3,11 +3,12 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useTheme } from '../context/ThemeContext.jsx';
 
 const nav = [
-  { to: '/', label: 'Dashboard', end: true },
+  { to: '/dashboard', label: 'Dashboard', end: true },
   { to: '/customers', label: 'Customers' },
   { to: '/conversations', label: 'Chats' },
   { to: '/bookings', label: 'Bookings' },
   { to: '/payments', label: 'Payments' },
+  { to: '/communications', label: 'Communications' },
   { to: '/billing', label: 'Billing' },
   { to: '/settings', label: 'Settings' },
 ];

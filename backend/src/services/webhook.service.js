@@ -11,6 +11,22 @@ import { sendWhatsAppImageFromBuffer, sendWhatsAppText } from './whatsapp.servic
 import { buildUpiLink } from '../utils/upi.js';
 import { qrPngBuffer } from './qrcode.service.js';
 
+const MESSAGE_PREFIX = 'WA_MSG:';
+
+function aiKnowledgeFromConfig(configServices) {
+  if (Array.isArray(configServices)) {
+    return { services: configServices, products: [], clientDetails: '' };
+  }
+  if (configServices && typeof configServices === 'object') {
+    return {
+      services: Array.isArray(configServices.services) ? configServices.services : [],
+      products: Array.isArray(configServices.products) ? configServices.products : [],
+      clientDetails: typeof configServices.clientDetails === 'string' ? configServices.clientDetails : '',
+    };
+  }
+  return { services: [], products: [], clientDetails: '' };
+}
+
 function normalizePhone(from) {
   const digits = String(from || '').replace(/\D/g, '');
   if (!digits) return '';
@@ -44,19 +60,15 @@ async function findOrCreateCustomer({ businessId, phone, name }) {
   });
 }
 
-/**
- * Process one inbound WhatsApp text message.
- */
-export async function handleInboundText({
-  phoneNumberId,
-  fromWaId,
-  textBody,
-  contactName,
-}) {
+function structuredContent(payload) {
+  return `${MESSAGE_PREFIX}${JSON.stringify(payload)}`;
+}
+
+async function resolveInboundContext({ phoneNumberId, fromWaId, contactName }) {
   const business = await findBusinessByPhoneNumberId(phoneNumberId);
   if (!business) {
     log('warn', 'webhook_unknown_phone_number_id', { phoneNumberId });
-    return { ok: false, reason: 'unknown_business' };
+    return null;
   }
 
   const phone = normalizePhone(fromWaId);
@@ -79,6 +91,22 @@ export async function handleInboundText({
     });
   }
 
+  return { business, customer, phone };
+}
+
+/**
+ * Process one inbound WhatsApp text message.
+ */
+export async function handleInboundText({
+  phoneNumberId,
+  fromWaId,
+  textBody,
+  contactName,
+}) {
+  const context = await resolveInboundContext({ phoneNumberId, fromWaId, contactName });
+  if (!context) return { ok: false, reason: 'unknown_business' };
+  const { business, customer, phone } = context;
+
   await prisma.message.create({
     data: {
       customerId: customer.id,
@@ -92,6 +120,7 @@ export async function handleInboundText({
   if (!cfg?.autoReplyEnabled) {
     return { ok: true, skipped: true };
   }
+  const knowledge = aiKnowledgeFromConfig(cfg.services);
 
   const slots = parseSlotsFromConfig(cfg.workingHours);
   const pickedSlot = matchSlotSelection(textBody, slots);
@@ -117,9 +146,11 @@ export async function handleInboundText({
     replyText = formatSlotsMessage(slots);
   } else if (intent === 'PRICE_QUERY') {
     replyText = await generateAIReply(
-      `Customer asked about pricing. Answer using services JSON only. Message: ${textBody}`,
+      `Customer asked about pricing. Answer using only services/products JSON. Message: ${textBody}`,
       {
-        services: cfg.services,
+        services: knowledge.services,
+        products: knowledge.products,
+        clientDetails: knowledge.clientDetails,
         workingHours: cfg.workingHours,
         businessName: business.name,
       },
@@ -151,7 +182,9 @@ export async function handleInboundText({
     }
   } else {
     replyText = await generateAIReply(textBody, {
-      services: cfg.services,
+      services: knowledge.services,
+      products: knowledge.products,
+      clientDetails: knowledge.clientDetails,
       workingHours: cfg.workingHours,
       businessName: business.name,
     });
@@ -175,6 +208,118 @@ export async function handleInboundText({
   } catch (e) {
     log('error', 'webhook_reply_send_failed', { message: e.message });
   }
+
+  return { ok: true };
+}
+
+/**
+ * Process one inbound WhatsApp image message.
+ */
+export async function handleInboundImage({
+  phoneNumberId,
+  fromWaId,
+  mediaId,
+  caption,
+  mimeType,
+  contactName,
+}) {
+  const context = await resolveInboundContext({ phoneNumberId, fromWaId, contactName });
+  if (!context) return { ok: false, reason: 'unknown_business' };
+  const { business, customer } = context;
+
+  if (!mediaId) return { ok: false, reason: 'missing_media_id' };
+
+  await prisma.message.create({
+    data: {
+      customerId: customer.id,
+      businessId: business.id,
+      content: structuredContent({
+        kind: 'image',
+        mediaId,
+        caption: caption || '',
+        mimeType: mimeType || '',
+      }),
+      type: 'USER',
+    },
+  });
+
+  return { ok: true };
+}
+
+export async function handleInboundNonText({
+  phoneNumberId,
+  fromWaId,
+  msgType,
+  msgPayload,
+  contactName,
+}) {
+  const context = await resolveInboundContext({ phoneNumberId, fromWaId, contactName });
+  if (!context) return { ok: false, reason: 'unknown_business' };
+  const { business, customer } = context;
+
+  if (!msgType) return { ok: false, reason: 'missing_message_type' };
+
+  let payload = { kind: msgType };
+  if (msgType === 'audio' || msgType === 'video' || msgType === 'document' || msgType === 'sticker') {
+    if (!msgPayload?.id) return { ok: false, reason: 'missing_media_id' };
+    payload = {
+      kind: msgType,
+      mediaId: msgPayload.id,
+      mimeType: msgPayload.mime_type || '',
+      caption: msgPayload.caption || '',
+      filename: msgPayload.filename || '',
+      sha256: msgPayload.sha256 || '',
+      voice: Boolean(msgPayload.voice),
+    };
+  } else if (msgType === 'location') {
+    payload = {
+      kind: 'location',
+      latitude: msgPayload?.latitude,
+      longitude: msgPayload?.longitude,
+      name: msgPayload?.name || '',
+      address: msgPayload?.address || '',
+      url: msgPayload?.url || '',
+    };
+  } else if (msgType === 'contacts') {
+    payload = {
+      kind: 'contacts',
+      contacts: Array.isArray(msgPayload) ? msgPayload : [],
+    };
+  } else if (msgType === 'button') {
+    payload = {
+      kind: 'button',
+      text: msgPayload?.text || '',
+      payload: msgPayload?.payload || '',
+    };
+  } else if (msgType === 'interactive') {
+    payload = {
+      kind: 'interactive',
+      interactiveType: msgPayload?.type || '',
+      buttonReply: msgPayload?.button_reply || null,
+      listReply: msgPayload?.list_reply || null,
+      nfmReply: msgPayload?.nfm_reply || null,
+    };
+  } else if (msgType === 'reaction') {
+    payload = {
+      kind: 'reaction',
+      emoji: msgPayload?.emoji || '',
+      messageId: msgPayload?.message_id || '',
+    };
+  } else {
+    payload = {
+      kind: msgType,
+      raw: msgPayload || null,
+    };
+  }
+
+  await prisma.message.create({
+    data: {
+      customerId: customer.id,
+      businessId: business.id,
+      content: structuredContent(payload),
+      type: 'USER',
+    },
+  });
 
   return { ok: true };
 }

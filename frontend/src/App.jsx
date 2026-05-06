@@ -1,9 +1,16 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout.jsx';
+import PublicLayout from './components/PublicLayout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import { useAuth } from './context/AuthContext.jsx';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
+import Home from './pages/Home.jsx';
+import Pricing from './pages/Pricing.jsx';
+import Contact from './pages/Contact.jsx';
+import PrivacyPolicy from './pages/PrivacyPolicy.jsx';
+import TermsConditions from './pages/TermsConditions.jsx';
+import RefundPolicy from './pages/RefundPolicy.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Customers from './pages/Customers.jsx';
 import Conversations from './pages/Conversations.jsx';
@@ -11,6 +18,7 @@ import Bookings from './pages/Bookings.jsx';
 import Payments from './pages/Payments.jsx';
 import Billing from './pages/Billing.jsx';
 import Settings from './pages/Settings.jsx';
+import Communications from './pages/Communications.jsx';
 
 export default function App() {
   const { isAuthenticated, bootstrapping, token } = useAuth();
@@ -25,8 +33,17 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
-      <Route path="/register" element={isAuthenticated ? <Navigate to="/" replace /> : <Register />} />
+      <Route element={<PublicLayout />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/pricing" element={<Pricing />} />
+        <Route path="/contact" element={<Contact />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="/terms-and-conditions" element={<TermsConditions />} />
+        <Route path="/refund-policy" element={<RefundPolicy />} />
+      </Route>
+
+      <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Register />} />
       <Route
         element={
           <ProtectedRoute>
@@ -34,15 +51,16 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/customers" element={<Customers />} />
         <Route path="/conversations" element={<Conversations />} />
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/payments" element={<Payments />} />
+        <Route path="/communications" element={<Communications />} />
         <Route path="/billing" element={<Billing />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/'} replace />} />
     </Routes>
   );
 }

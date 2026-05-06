@@ -4,6 +4,7 @@ import * as messageController from '../controllers/message.controller.js';
 import * as paymentLinkController from '../controllers/paymentLink.controller.js';
 import * as configController from '../controllers/config.controller.js';
 import * as billingController from '../controllers/billing.controller.js';
+import * as communicationController from '../controllers/communication.controller.js';
 import { prisma } from '../lib/prisma.js';
 
 const router = Router();
@@ -40,5 +41,18 @@ router.patch('/customer-payments/:id/mark-paid', authMiddleware, requireOwner, a
     next(e);
   }
 });
+
+router.get('/wallet', authMiddleware, communicationController.getWallet);
+router.get('/wallet/transactions', authMiddleware, communicationController.listWalletTransactions);
+router.post('/wallet/add-money', authMiddleware, requireOwner, communicationController.addMoneyToWallet);
+
+router.get('/contacts', authMiddleware, communicationController.listContacts);
+router.post('/contacts/upload', authMiddleware, communicationController.uploadContacts);
+
+router.get('/templates', authMiddleware, communicationController.listTemplates);
+router.post('/templates', authMiddleware, communicationController.createTemplate);
+router.patch('/templates/:id/status', authMiddleware, communicationController.updateTemplateStatus);
+
+router.post('/communications/send', authMiddleware, communicationController.sendTemplateCommunication);
 
 export default router;

@@ -1,10 +1,144 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
 
+function normalizeItems(input) {
+  if (!Array.isArray(input)) return [];
+  return input.map((item) => {
+    if (item && typeof item === 'object') {
+      return {
+        name: item.name || item.title || '',
+        price: item.price || '',
+        description: item.description || item.details || '',
+      };
+    }
+    return { name: String(item || ''), price: '', description: '' };
+  });
+}
+
+function emptyItem() {
+  return { name: '', price: '', description: '' };
+}
+
+function CatalogEditor({ title, items, onChange, addLabel }) {
+  function updateAt(index, key, value) {
+    const next = items.map((it, i) => (i === index ? { ...it, [key]: value } : it));
+    onChange(next);
+  }
+
+  function removeAt(index) {
+    onChange(items.filter((_, i) => i !== index));
+  }
+
+  function addOne() {
+    onChange([...items, emptyItem()]);
+  }
+
+  function moveItem(index, direction) {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= items.length) return;
+    const next = [...items];
+    const current = next[index];
+    next[index] = next[nextIndex];
+    next[nextIndex] = current;
+    onChange(next);
+  }
+
+  function duplicateAt(index) {
+    const source = items[index];
+    if (!source) return;
+    const clone = { ...source };
+    onChange([...items.slice(0, index + 1), clone, ...items.slice(index + 1)]);
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{title}</label>
+        <button
+          type="button"
+          onClick={addOne}
+          className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium"
+        >
+          {addLabel}
+        </button>
+      </div>
+      <div className="space-y-3">
+        {items.map((item, index) => (
+          <div
+            key={`${title}-${index}`}
+            className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2"
+          >
+            <div className="grid sm:grid-cols-2 gap-2">
+              <input
+                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                value={item.name}
+                onChange={(e) => updateAt(index, 'name', e.target.value)}
+                placeholder="Name"
+              />
+              <input
+                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                value={item.price}
+                onChange={(e) => updateAt(index, 'price', e.target.value)}
+                placeholder="Price (e.g. 499 or ₹499)"
+              />
+            </div>
+            <textarea
+              rows={2}
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+              value={item.description}
+              onChange={(e) => updateAt(index, 'description', e.target.value)}
+              placeholder="Short description"
+            />
+            <div className="flex items-center gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() => moveItem(index, -1)}
+                disabled={index === 0}
+                className="font-medium text-slate-600 disabled:opacity-40 dark:text-slate-300"
+              >
+                Move up
+              </button>
+              <button
+                type="button"
+                onClick={() => moveItem(index, 1)}
+                disabled={index === items.length - 1}
+                className="font-medium text-slate-600 disabled:opacity-40 dark:text-slate-300"
+              >
+                Move down
+              </button>
+              <button
+                type="button"
+                onClick={() => duplicateAt(index)}
+                className="font-medium text-brand-700 dark:text-brand-300"
+              >
+                Duplicate
+              </button>
+              <button
+                type="button"
+                onClick={() => removeAt(index)}
+                className="font-medium text-red-600 dark:text-red-400"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {!items.length && (
+        <div className="text-xs text-slate-500 dark:text-slate-400">
+          No items yet. Click “{addLabel}” to add.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [businessName, setBusinessName] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
-  const [servicesJson, setServicesJson] = useState('[]');
+  const [services, setServices] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [clientDetails, setClientDetails] = useState('');
   const [workingHours, setWorkingHours] = useState('{}');
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
   const [upiId, setUpiId] = useState('');
@@ -19,7 +153,9 @@ export default function Settings() {
         if (cancelled) return;
         setBusinessName(data.business?.name || '');
         setPhoneNumberId(data.business?.phoneNumberId || '');
-        setServicesJson(JSON.stringify(data.config?.services ?? [], null, 2));
+        setServices(normalizeItems(data.config?.services ?? []));
+        setProducts(normalizeItems(data.config?.products ?? []));
+        setClientDetails(data.config?.clientDetails || '');
         setWorkingHours(
           typeof data.config?.workingHours === 'string'
             ? data.config.workingHours
@@ -40,14 +176,7 @@ export default function Settings() {
     e.preventDefault();
     setError('');
     setSaved('');
-    let services;
     let wh = workingHours;
-    try {
-      services = JSON.parse(servicesJson);
-    } catch {
-      setError('Services must be valid JSON');
-      return;
-    }
     try {
       const parsed = JSON.parse(workingHours);
       wh = JSON.stringify(parsed);
@@ -56,11 +185,29 @@ export default function Settings() {
       return;
     }
 
+    const cleanServices = services
+      .map((item) => ({
+        name: item.name?.trim() || '',
+        price: item.price?.trim() || '',
+        description: item.description?.trim() || '',
+      }))
+      .filter((item) => item.name || item.price || item.description);
+
+    const cleanProducts = products
+      .map((item) => ({
+        name: item.name?.trim() || '',
+        price: item.price?.trim() || '',
+        description: item.description?.trim() || '',
+      }))
+      .filter((item) => item.name || item.price || item.description);
+
     try {
       await api.put('/config', {
         businessName,
         phoneNumberId: phoneNumberId || null,
-        services,
+        services: cleanServices,
+        products: cleanProducts,
+        clientDetails: clientDetails || '',
         workingHours: wh,
         autoReplyEnabled,
         upiId: upiId || null,
@@ -76,7 +223,7 @@ export default function Settings() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Settings</h1>
         <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Link Meta phone number id, tune services, and add your business UPI for customer payments.
+          Add client profile details plus services/products so AI replies are specific to each business.
         </p>
       </div>
 
@@ -113,13 +260,30 @@ export default function Settings() {
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-            Services (JSON array)
+            Client details for AI (about business, tone, policies, FAQs)
           </label>
           <textarea
-            rows={6}
-            className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-mono"
-            value={servicesJson}
-            onChange={(e) => setServicesJson(e.target.value)}
+            rows={5}
+            className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+            value={clientDetails}
+            onChange={(e) => setClientDetails(e.target.value)}
+            placeholder="Example: We are Glow Clinic in Jaipur. Friendly tone. 10am-8pm support. No refunds after 24h."
+          />
+        </div>
+        <div>
+          <CatalogEditor
+            title="Services"
+            items={services}
+            onChange={setServices}
+            addLabel="Add Service"
+          />
+        </div>
+        <div>
+          <CatalogEditor
+            title="Products"
+            items={products}
+            onChange={setProducts}
+            addLabel="Add Product"
           />
         </div>
         <div>

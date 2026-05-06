@@ -53,20 +53,31 @@ function createLlmClient() {
 
 /**
  * @param {string} message
- * @param {{ services: unknown, workingHours: string, businessName: string }} businessConfig
+ * @param {{ services: unknown, products?: unknown, clientDetails?: string, workingHours: string, businessName: string }} businessConfig
  */
 export async function generateAIReply(message, businessConfig) {
   let servicesText = '';
+  let productsText = '';
   try {
     const s = businessConfig.services;
     servicesText = typeof s === 'string' ? s : JSON.stringify(s ?? []);
   } catch {
     servicesText = '[]';
   }
+  try {
+    const p = businessConfig.products;
+    productsText = typeof p === 'string' ? p : JSON.stringify(p ?? []);
+  } catch {
+    productsText = '[]';
+  }
+  const clientDetails = String(businessConfig.clientDetails || '').trim();
 
   const prompt = `You are a WhatsApp assistant for an Indian SMB "${businessConfig.businessName}".
 Reply in Hinglish or English. Keep it under 2 lines. Be helpful, polite, and clear.
+Business/client details: ${clientDetails || 'Not provided'}
 Use only these services (JSON): ${servicesText}
+Use only these products (JSON): ${productsText}
+If details are missing, ask one concise follow-up question.
 Customer message: ${message}`;
 
   const llm = createLlmClient();

@@ -18,7 +18,7 @@ export default function Register() {
     try {
       const data = await registerRequest({ businessName, email, password });
       loginState(data);
-      navigate('/');
+      navigate('/dashboard');
     } catch (err) {
       setError(err.response?.data?.error || 'Registration failed');
     } finally {
