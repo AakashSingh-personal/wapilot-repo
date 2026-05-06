@@ -69,10 +69,67 @@ function isCancelBookingMessage(text) {
 }
 
 function extractRequestedAmountInInr(text) {
-  const m = String(text || '').match(/(?:rs\.?|inr|₹)\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:rs\.?|inr|₹)/i);
-  const val = Number(m?.[1] || m?.[2]);
-  if (!Number.isFinite(val) || val <= 0) return null;
-  return Math.round(val * 100) / 100;
+  const raw = String(text || '');
+  const preferred = raw.match(/(?:rs\.?|inr|₹)\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:rs\.?|inr|₹)/i);
+  const preferredVal = Number(preferred?.[1] || preferred?.[2]);
+  if (Number.isFinite(preferredVal) && preferredVal > 0) {
+    return Math.round(preferredVal * 100) / 100;
+  }
+
+  // Fallback: in payment-intent messages, users often send bare amounts like "service is 3999".
+  const allNums = [...raw.matchAll(/\b\d+(?:\.\d{1,2})?\b/g)]
+    .map((m) => Number(m[0]))
+    .filter((n) => Number.isFinite(n) && n >= 10 && n <= 1000000);
+  if (!allNums.length) return null;
+  return Math.round(Math.max(...allNums) * 100) / 100;
+}
+
+function parsePriceNumber(value) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const cleaned = raw.replace(/[^\d.]/g, '');
+  const n = Number(cleaned);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function serviceCatalogEntries(services) {
+  if (!Array.isArray(services)) return [];
+  return services
+    .map((s) => {
+      if (typeof s === 'string') return { name: s, amount: null };
+      if (!s || typeof s !== 'object') return null;
+      const name = String(s.name || s.title || s.service || '').trim();
+      const amount = parsePriceNumber(s.price || s.amount || s.rate || s.cost);
+      if (!name) return null;
+      return { name, amount };
+    })
+    .filter(Boolean);
+}
+
+function inferAmountFromSelectedService({ text, history, services }) {
+  const catalog = serviceCatalogEntries(services).filter((x) => Number.isFinite(x.amount) && x.amount > 0);
+  if (!catalog.length) return null;
+
+  const pickFromText = (t) => {
+    const lower = String(t || '').toLowerCase();
+    const matches = catalog.filter((c) => lower.includes(c.name.toLowerCase()));
+    if (!matches.length) return null;
+    matches.sort((a, b) => b.name.length - a.name.length);
+    return matches[0].amount;
+  };
+
+  const fromCurrent = pickFromText(text);
+  if (fromCurrent) return fromCurrent;
+
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const m = history[i];
+    if (m?.type !== 'USER') continue;
+    const amt = pickFromText(m.content);
+    if (amt) return amt;
+  }
+  return null;
 }
 
 async function resolveInboundContext({ phoneNumberId, fromWaId, contactName }) {
@@ -214,7 +271,12 @@ export async function handleInboundText({
     );
   } else if (intent === 'PAYMENT') {
     const requestedAmount = extractRequestedAmountInInr(textBody);
-    const amountInInr = requestedAmount || 100;
+    const selectedServiceAmount = inferAmountFromSelectedService({
+      text: textBody,
+      history,
+      services: knowledge.services,
+    });
+    const amountInInr = requestedAmount || selectedServiceAmount || 100;
     try {
       const cp = await prisma.customerPayment.create({
         data: {
