@@ -47,6 +47,21 @@ function toMetaTemplateBody(content) {
   return replaced;
 }
 
+function toMetaTemplateTextWithSamples(content) {
+  const keys = [];
+  const seen = new Map();
+  const text = String(content || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key) => {
+    const cleaned = String(key || '').trim();
+    if (!cleaned) return _m;
+    if (!seen.has(cleaned)) {
+      keys.push(cleaned);
+      seen.set(cleaned, keys.length);
+    }
+    return `{{${seen.get(cleaned)}}}`;
+  });
+  return { text, samples: keys };
+}
+
 function mapMetaStatusToLocal(metaStatus) {
   return metaStatus === 'APPROVED' ? 'WORKING' : 'NOT_WORKING';
 }
@@ -62,14 +77,28 @@ function normalizeMetaComponents(components) {
     if (!component || typeof component !== 'object') return component;
     const next = { ...component };
     if (typeof next.text === 'string') {
-      next.text = toMetaTemplateBody(next.text);
+      const normalized = toMetaTemplateTextWithSamples(next.text);
+      next.text = normalized.text;
+      if (normalized.samples.length && (next.type === 'BODY' || next.type === 'HEADER')) {
+        const exampleKey = next.type === 'BODY' ? 'body_text' : 'header_text';
+        next.example = {
+          ...(next.example && typeof next.example === 'object' ? next.example : {}),
+          [exampleKey]: [normalized.samples],
+        };
+      }
     }
     if (Array.isArray(next.buttons)) {
       next.buttons = next.buttons.map((button) => {
         if (!button || typeof button !== 'object') return button;
         const b = { ...button };
         if (typeof b.text === 'string') b.text = b.text.trim();
-        if (typeof b.url === 'string') b.url = b.url.trim();
+        if (typeof b.url === 'string') {
+          const normalizedUrl = toMetaTemplateTextWithSamples(b.url.trim());
+          b.url = normalizedUrl.text;
+          if (normalizedUrl.samples.length) {
+            b.example = normalizedUrl.samples;
+          }
+        }
         return b;
       });
     }
