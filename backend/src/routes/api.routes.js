@@ -21,7 +21,6 @@ router.post('/billing/mark-paid', authMiddleware, billingController.markSubscrip
 router.patch(
   '/billing/payments/:id/verify',
   authMiddleware,
-  requireOwner,
   billingController.verifySubscriptionPayment,
 );
 
@@ -45,11 +44,14 @@ router.patch('/customer-payments/:id/mark-paid', authMiddleware, requireOwner, a
 router.get('/wallet', authMiddleware, communicationController.getWallet);
 router.get('/wallet/transactions', authMiddleware, communicationController.listWalletTransactions);
 router.post('/wallet/add-money', authMiddleware, requireOwner, communicationController.addMoneyToWallet);
+router.patch('/wallet/add-money/:id/verify', authMiddleware, requireOwner, communicationController.verifyWalletTopup);
 
 router.get('/contacts', authMiddleware, communicationController.listContacts);
 router.post('/contacts/upload', authMiddleware, communicationController.uploadContacts);
+router.post('/media/upload', authMiddleware, communicationController.uploadMedia);
 
 router.get('/templates', authMiddleware, communicationController.listTemplates);
+router.get('/templates/meta-options', authMiddleware, communicationController.metaTemplateOptions);
 router.post('/templates', authMiddleware, communicationController.createTemplate);
 router.patch('/templates/:id/status', authMiddleware, communicationController.updateTemplateStatus);
 

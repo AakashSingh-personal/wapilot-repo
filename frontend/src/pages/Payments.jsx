@@ -37,6 +37,14 @@ export default function Payments() {
     };
   }, []);
 
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (document.hidden) return;
+      load().catch(() => {});
+    }, 5000);
+    return () => clearInterval(t);
+  }, []);
+
   async function markPaid(id) {
     setError('');
     try {
@@ -61,7 +69,7 @@ export default function Payments() {
         customerId,
         amount,
       });
-      setModal({ type: 'qr', ...res });
+      setModal({ type: 'link', ...res });
     } catch (e) {
       setError(e.response?.data?.error || 'Could not create link');
     }
@@ -74,7 +82,7 @@ export default function Payments() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Payments</h1>
         <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Subscription records + customer UPI collections.
+          Subscription records + customer payment collections.
         </p>
       </div>
 
@@ -85,7 +93,7 @@ export default function Payments() {
       )}
 
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-4">
-        <h2 className="font-semibold text-slate-900 dark:text-white">Create payment link</h2>
+        <h2 className="font-semibold text-slate-900 dark:text-white">Create payment request</h2>
         <div className="flex flex-wrap gap-3 items-end">
           <div>
             <label className="block text-xs text-slate-500 mb-1">Customer</label>
@@ -115,7 +123,7 @@ export default function Payments() {
             onClick={generateLink}
             className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold"
           >
-            Generate UPI QR
+            Create Razorpay link
           </button>
         </div>
       </div>
@@ -201,12 +209,21 @@ export default function Payments() {
         </table>
       </div>
 
-      {modal?.type === 'qr' && (
+      {modal?.type === 'link' && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-sm w-full p-6 border border-slate-200 dark:border-slate-800">
-            <div className="font-semibold text-lg mb-2">UPI QR</div>
-            <img src={modal.qrImage} alt="QR" className="w-full rounded-xl border border-slate-100 dark:border-slate-800" />
-            <p className="text-xs text-slate-500 mt-3 break-all">{modal.upiLink}</p>
+            <div className="font-semibold text-lg mb-2">Razorpay Payment Link</div>
+            <a
+              href={modal.shortUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="block text-sm text-brand-700 underline break-all"
+            >
+              {modal.shortUrl}
+            </a>
+            <p className="text-xs text-slate-500 mt-3">
+              Share this link with customer. Status updates automatically on webhook capture.
+            </p>
             <button
               type="button"
               className="mt-4 w-full rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 py-2 font-semibold"

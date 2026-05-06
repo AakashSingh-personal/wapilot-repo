@@ -5,5 +5,6 @@ const router = Router();
 
 router.get('/', webhookController.verifyWebhook);
 router.post('/', webhookController.receiveWebhook);
+router.post('/razorpay', webhookController.receiveRazorpayWebhook);
 
 export default router;

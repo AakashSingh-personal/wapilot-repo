@@ -64,6 +64,7 @@ export async function listConversations(req, res, next) {
       where: { businessId },
       include: {
         messages: {
+          where: { businessId },
           orderBy: { createdAt: 'desc' },
           take: 1,
           select: {
@@ -124,6 +125,12 @@ export async function listLeads(req, res, next) {
 export async function messagesForCustomer(req, res, next) {
   try {
     const { customerId } = req.params;
+    const customer = await prisma.customer.findFirst({
+      where: { id: customerId, businessId: req.user.businessId },
+      select: { id: true },
+    });
+    if (!customer) return res.status(404).json({ error: 'Customer not found' });
+
     const messages = await prisma.message.findMany({
       where: {
         businessId: req.user.businessId,
@@ -140,6 +147,20 @@ export async function messagesForCustomer(req, res, next) {
 export async function whatsappMedia(req, res, next) {
   try {
     const { mediaId } = req.params;
+    // Prevent cross-tenant media access: mediaId must exist in this business chat history.
+    const linkedMessage = await prisma.message.findFirst({
+      where: {
+        businessId: req.user.businessId,
+        OR: [
+          { content: { contains: `"mediaId":"${mediaId}"` } },
+          { content: { contains: `"mediaId": "${mediaId}"` } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!linkedMessage) {
+      return res.status(404).json({ error: 'Media not found' });
+    }
     const { buffer, mimeType } = await fetchWhatsAppMediaById(mediaId);
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Cache-Control', 'private, max-age=300');

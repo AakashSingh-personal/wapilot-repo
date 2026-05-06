@@ -1,6 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import { buildUpiLink } from '../utils/upi.js';
-import { qrPngDataUrl } from '../services/qrcode.service.js';
+import { createRazorpayPaymentLink } from '../services/razorpay.service.js';
 
 export async function createPaymentLink(req, res, next) {
   try {
@@ -9,36 +8,52 @@ export async function createPaymentLink(req, res, next) {
       return res.status(400).json({ error: 'customerId and amount required' });
     }
 
-    const business = await prisma.business.findUnique({
-      where: { id: req.user.businessId },
-      include: { config: true },
-    });
+    const business = await prisma.business.findUnique({ where: { id: req.user.businessId } });
     const customer = await prisma.customer.findFirst({
       where: { id: customerId, businessId: req.user.businessId },
     });
 
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
-    const upi = business?.config?.upiId?.trim();
-    if (!upi) return res.status(400).json({ error: 'Configure business UPI ID in settings first' });
+    const amtNum = Number(amount);
+    if (!Number.isFinite(amtNum) || amtNum <= 0) {
+      return res.status(400).json({ error: 'Valid amount required' });
+    }
 
-    const amtStr = String(amount);
-    const link = buildUpiLink({
-      pa: upi,
-      pn: business.name.slice(0, 50),
-      am: amtStr,
-    });
-    const qrImage = await qrPngDataUrl(link);
-
-    await prisma.customerPayment.create({
+    const cp = await prisma.customerPayment.create({
       data: {
         businessId: req.user.businessId,
         customerId,
-        amount: amtStr,
+        amount: amtNum.toFixed(2),
         status: 'PENDING',
+        provider: 'RAZORPAY',
       },
     });
 
-    res.json({ upiLink: link, qrImage });
+    const paymentLink = await createRazorpayPaymentLink({
+      amountInInr: amtNum,
+      description: `Payment for ${business?.name || 'Business'}`,
+      customer: {
+        name: customer.name || undefined,
+        contact: customer.phone ? customer.phone.replace(/^\+/, '') : undefined,
+      },
+      notes: {
+        kind: 'customer_payment',
+        customerPaymentId: cp.id,
+        businessId: req.user.businessId,
+      },
+    });
+
+    await prisma.customerPayment.update({
+      where: { id: cp.id },
+      data: { providerLinkId: paymentLink.id },
+    });
+
+    res.json({
+      paymentLinkId: paymentLink.id,
+      shortUrl: paymentLink.short_url,
+      amount: amtNum.toFixed(2),
+      status: 'PENDING',
+    });
   } catch (e) {
     next(e);
   }

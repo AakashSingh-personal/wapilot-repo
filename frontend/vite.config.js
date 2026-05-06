@@ -18,6 +18,7 @@ export default defineConfig({
       '/contacts': 'http://localhost:3000',
       '/templates': 'http://localhost:3000',
       '/communications': 'http://localhost:3000',
+      '/media': 'http://localhost:3000',
       '/health': 'http://localhost:3000',
     },
   },

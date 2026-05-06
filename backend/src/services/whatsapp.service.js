@@ -11,6 +11,10 @@ function token() {
   return process.env.WHATSAPP_ACCESS_TOKEN || '';
 }
 
+function resolveWabaId(explicit) {
+  return explicit || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '';
+}
+
 function resolvePhoneNumberId(explicit) {
   return explicit || process.env.PHONE_NUMBER_ID || '';
 }
@@ -132,4 +136,60 @@ export async function fetchWhatsAppMediaById(mediaId) {
     buffer: Buffer.from(fileRes.data),
     mimeType: meta.data?.mime_type || fileRes.headers['content-type'] || 'application/octet-stream',
   };
+}
+
+function toMetaError(e) {
+  if (e?.response?.data) return JSON.stringify(e.response.data);
+  return e?.message || 'Unknown Meta API error';
+}
+
+export async function createWhatsAppTemplate({ wabaId, payload }) {
+  const t = token();
+  const resolvedWabaId = resolveWabaId(wabaId);
+  if (!t || !resolvedWabaId) {
+    throw new Error('Missing WHATSAPP_ACCESS_TOKEN or WHATSAPP_BUSINESS_ACCOUNT_ID');
+  }
+
+  const url = `${GRAPH}/${resolvedWabaId}/message_templates`;
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Meta template payload is required');
+  }
+  try {
+    const res = await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${t}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    return res.data;
+  } catch (e) {
+    throw new Error(`Meta template create failed: ${toMetaError(e)}`);
+  }
+}
+
+export async function listWhatsAppTemplates({ wabaId, limit = 200 } = {}) {
+  const t = token();
+  const resolvedWabaId = resolveWabaId(wabaId);
+  if (!t || !resolvedWabaId) {
+    throw new Error('Missing WHATSAPP_ACCESS_TOKEN or WHATSAPP_BUSINESS_ACCOUNT_ID');
+  }
+
+  const all = [];
+  let url = `${GRAPH}/${resolvedWabaId}/message_templates?limit=${Math.min(Math.max(limit, 1), 200)}`;
+  while (url) {
+    try {
+      const res = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${t}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const rows = Array.isArray(res.data?.data) ? res.data.data : [];
+      all.push(...rows);
+      url = res.data?.paging?.next || null;
+    } catch (e) {
+      throw new Error(`Meta template list failed: ${toMetaError(e)}`);
+    }
+  }
+  return all;
 }

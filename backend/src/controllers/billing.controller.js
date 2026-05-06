@@ -1,30 +1,48 @@
 import { prisma } from '../lib/prisma.js';
-import { buildUpiLink } from '../utils/upi.js';
-import { qrPngDataUrl } from '../services/qrcode.service.js';
+import {
+  createRazorpayOrder,
+  razorpayPublicConfig,
+  verifyRazorpayPaymentSignature,
+} from '../services/razorpay.service.js';
 
 function proAmount() {
   const raw = process.env.SUBSCRIPTION_PRO_AMOUNT || '999';
   return raw;
 }
 
-function platformUpi() {
-  return (process.env.WAPILOT_PLATFORM_UPI_ID || '').trim();
-}
-
 export async function subscriptionQr(req, res, next) {
   try {
-    const amt = proAmount();
-    const pa = platformUpi();
-    if (!pa) {
-      return res.status(400).json({ error: 'WAPILOT_PLATFORM_UPI_ID not configured on server' });
-    }
-    const link = buildUpiLink({
-      pa,
-      pn: 'WAPilot',
-      am: amt,
+    const amt = Number(proAmount());
+    const payment = await prisma.payment.create({
+      data: {
+        businessId: req.user.businessId,
+        amount: amt.toFixed(2),
+        type: 'SUBSCRIPTION',
+        status: 'PENDING',
+        provider: 'RAZORPAY',
+      },
     });
-    const qrImage = await qrPngDataUrl(link);
-    res.json({ upiLink: link, qrImage, amount: amt, plan: 'PRO' });
+    const order = await createRazorpayOrder({
+      amountInInr: amt,
+      receipt: payment.id,
+      notes: {
+        paymentId: payment.id,
+        businessId: req.user.businessId,
+        plan: 'PRO',
+      },
+    });
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { providerOrderId: order.id },
+    });
+    res.json({
+      paymentId: payment.id,
+      orderId: order.id,
+      amount: amt,
+      currency: order.currency || 'INR',
+      keyId: razorpayPublicConfig().keyId,
+      plan: 'PRO',
+    });
   } catch (e) {
     next(e);
   }
@@ -50,10 +68,20 @@ export async function markSubscriptionPaid(req, res, next) {
 export async function verifySubscriptionPayment(req, res, next) {
   try {
     const { id } = req.params;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
     const payment = await prisma.payment.findFirst({
       where: { id, businessId: req.user.businessId },
     });
     if (!payment) return res.status(404).json({ error: 'Payment not found' });
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: 'Missing Razorpay payment verification fields' });
+    }
+    const valid = verifyRazorpayPaymentSignature({
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id,
+      signature: razorpay_signature,
+    });
+    if (!valid) return res.status(400).json({ error: 'Invalid Razorpay signature' });
 
     const expires = new Date();
     expires.setMonth(expires.getMonth() + 1);
@@ -61,7 +89,13 @@ export async function verifySubscriptionPayment(req, res, next) {
     await prisma.$transaction(async (tx) => {
       await tx.payment.update({
         where: { id: payment.id },
-        data: { status: 'SUCCESS' },
+        data: {
+          status: 'SUCCESS',
+          providerOrderId: razorpay_order_id,
+          providerPaymentId: razorpay_payment_id,
+          providerSignature: razorpay_signature,
+          provider: 'RAZORPAY',
+        },
       });
       await tx.subscription.updateMany({
         where: { businessId: req.user.businessId },
@@ -98,7 +132,11 @@ export async function subscriptionStatus(req, res, next) {
       },
       orderBy: { createdAt: 'desc' },
     });
-    res.json({ subscription: sub, pendingPayment: pending });
+    const latest = await prisma.payment.findFirst({
+      where: { businessId: req.user.businessId, type: 'SUBSCRIPTION' },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ subscription: sub, pendingPayment: pending, latestPayment: latest });
   } catch (e) {
     next(e);
   }

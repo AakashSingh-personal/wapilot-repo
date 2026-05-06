@@ -1,5 +1,12 @@
 import { prisma } from '../lib/prisma.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
+import { createWhatsAppTemplate, listWhatsAppTemplates } from '../services/whatsapp.service.js';
+import { uploadBase64ToSupabase } from '../services/supabase.service.js';
+import {
+  createRazorpayOrder,
+  razorpayPublicConfig,
+  verifyRazorpayPaymentSignature,
+} from '../services/razorpay.service.js';
 
 const MESSAGE_COST_INR = Number(process.env.COMMUNICATION_COST_PER_MESSAGE || 2);
 
@@ -15,6 +22,83 @@ function fillTemplate(template, variables = {}) {
     const v = variables[key];
     return v === undefined || v === null ? '' : String(v);
   });
+}
+
+function toMetaTemplateName(name, businessId) {
+  const ns = String(businessId || '')
+    .replace(/-/g, '')
+    .slice(0, 8)
+    .toLowerCase();
+  const base = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 480);
+  return `${ns}_${base}`.replace(/^_+|_+$/g, '').slice(0, 512);
+}
+
+function toMetaTemplateBody(content) {
+  const keys = [];
+  const replaced = content.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key) => {
+    const idx = keys.push(key);
+    return `{{${idx}}}`;
+  });
+  return replaced;
+}
+
+function mapMetaStatusToLocal(metaStatus) {
+  return metaStatus === 'APPROVED' ? 'WORKING' : 'NOT_WORKING';
+}
+
+function extractBodyTextFromComponents(components = []) {
+  const body = (Array.isArray(components) ? components : []).find((c) => c?.type === 'BODY');
+  return typeof body?.text === 'string' ? body.text : '';
+}
+
+const META_TEMPLATE_OPTIONS = {
+  categories: ['MARKETING', 'UTILITY', 'AUTHENTICATION'],
+  languages: [
+    'en_US',
+    'en_GB',
+    'hi',
+    'ar',
+    'es',
+    'pt_BR',
+    'fr',
+    'de',
+    'id',
+    'it',
+  ],
+  componentTypes: ['HEADER', 'BODY', 'FOOTER', 'BUTTONS'],
+  headerFormats: ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION'],
+  buttonTypes: ['QUICK_REPLY', 'URL', 'PHONE_NUMBER', 'COPY_CODE', 'OTP'],
+};
+
+async function syncTemplateStatusesFromMeta(businessId) {
+  const metaTemplates = await listWhatsAppTemplates();
+  const byName = new Map(metaTemplates.map((t) => [t.name, t]));
+  const local = await prisma.template.findMany({
+    where: { businessId },
+    select: { id: true, name: true, status: true },
+  });
+
+  const updates = [];
+  for (const t of local) {
+    const metaName = toMetaTemplateName(t.name, businessId);
+    const meta = byName.get(metaName);
+    if (!meta?.status) continue;
+    const nextStatus = mapMetaStatusToLocal(meta.status);
+    if (nextStatus !== t.status) {
+      updates.push(
+        prisma.template.update({
+          where: { id: t.id },
+          data: { status: nextStatus },
+        }),
+      );
+    }
+  }
+  if (updates.length) await prisma.$transaction(updates);
 }
 
 async function getOrCreateWallet(tx, businessId) {
@@ -44,12 +128,16 @@ export async function getWallet(req, res, next) {
 export async function listWalletTransactions(req, res, next) {
   try {
     const type = req.query?.type;
+    const source = req.query?.source;
     const rawLimit = Number(req.query?.limit);
     const rawOffset = Number(req.query?.offset);
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 200) : 50;
     const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
     const where = { businessId: req.user.businessId };
     if (type === 'CREDIT' || type === 'DEBIT') where.type = type;
+    if (source === 'TOPUP') {
+      where.description = { contains: 'Wallet top-up' };
+    }
 
     const rows = await prisma.walletTransaction.findMany({
       where,
@@ -74,27 +162,98 @@ export async function addMoneyToWallet(req, res, next) {
       return res.status(400).json({ error: 'Valid amount is required' });
     }
     const amount = amountNum.toFixed(2);
-    const businessId = req.user.businessId;
+    const payment = await prisma.payment.create({
+      data: {
+        businessId: req.user.businessId,
+        amount,
+        type: 'WALLET_TOPUP',
+        status: 'PENDING',
+        provider: 'RAZORPAY',
+      },
+    });
+    const order = await createRazorpayOrder({
+      amountInInr: amountNum,
+      receipt: payment.id,
+      notes: {
+        kind: 'wallet_topup',
+        paymentId: payment.id,
+        businessId: req.user.businessId,
+      },
+    });
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { providerOrderId: order.id },
+    });
 
-    const result = await prisma.$transaction(async (tx) => {
-      const wallet = await getOrCreateWallet(tx, businessId);
-      const nextBalance = (Number(wallet.balance) + amountNum).toFixed(2);
-      const updated = await tx.wallet.update({
+    res.status(201).json({
+      paymentId: payment.id,
+      orderId: order.id,
+      amount: amountNum,
+      currency: order.currency || 'INR',
+      keyId: razorpayPublicConfig().keyId,
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function verifyWalletTopup(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+    const payment = await prisma.payment.findFirst({
+      where: {
+        id,
+        businessId: req.user.businessId,
+        type: 'WALLET_TOPUP',
+      },
+    });
+    if (!payment) return res.status(404).json({ error: 'Wallet top-up payment not found' });
+    if (payment.status === 'SUCCESS') {
+      const wallet = await prisma.wallet.findUnique({ where: { businessId: req.user.businessId } });
+      return res.json({ ok: true, wallet });
+    }
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: 'Missing Razorpay verification fields' });
+    }
+    const valid = verifyRazorpayPaymentSignature({
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id,
+      signature: razorpay_signature,
+    });
+    if (!valid) return res.status(400).json({ error: 'Invalid Razorpay signature' });
+
+    await prisma.$transaction(async (tx) => {
+      const fresh = await tx.payment.findUnique({ where: { id: payment.id } });
+      if (!fresh || fresh.status === 'SUCCESS') return;
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: 'SUCCESS',
+          providerOrderId: razorpay_order_id,
+          providerPaymentId: razorpay_payment_id,
+          providerSignature: razorpay_signature,
+          provider: 'RAZORPAY',
+        },
+      });
+      const wallet = await getOrCreateWallet(tx, req.user.businessId);
+      const nextBalance = (Number(wallet.balance) + Number(payment.amount)).toFixed(2);
+      await tx.wallet.update({
         where: { id: wallet.id },
         data: { balance: nextBalance },
       });
       await tx.walletTransaction.create({
         data: {
-          businessId,
-          amount,
+          businessId: req.user.businessId,
+          amount: payment.amount,
           type: 'CREDIT',
-          description: req.body?.description || 'Wallet top-up',
+          description: `Wallet top-up (${payment.id})`,
         },
       });
-      return updated;
     });
 
-    res.status(201).json({ wallet: result });
+    const wallet = await prisma.wallet.findUnique({ where: { businessId: req.user.businessId } });
+    res.json({ ok: true, wallet });
   } catch (e) {
     next(e);
   }
@@ -154,6 +313,11 @@ export async function uploadContacts(req, res, next) {
 
 export async function listTemplates(req, res, next) {
   try {
+    try {
+      await syncTemplateStatusesFromMeta(req.user.businessId);
+    } catch {
+      // Keep local templates usable even when Meta status sync fails.
+    }
     const templates = await prisma.template.findMany({
       where: { businessId: req.user.businessId },
       orderBy: { createdAt: 'desc' },
@@ -164,22 +328,81 @@ export async function listTemplates(req, res, next) {
   }
 }
 
+export async function metaTemplateOptions(_req, res) {
+  res.json(META_TEMPLATE_OPTIONS);
+}
+
+export async function uploadMedia(req, res, next) {
+  try {
+    const { base64Data, mimeType, fileName, bucket } = req.body || {};
+    if (!base64Data) {
+      return res.status(400).json({ error: 'base64Data is required' });
+    }
+    const uploaded = await uploadBase64ToSupabase({
+      base64Data,
+      mimeType,
+      fileName,
+      bucket,
+      businessId: req.user.businessId,
+    });
+    res.status(201).json(uploaded);
+  } catch (e) {
+    next(e);
+  }
+}
+
 export async function createTemplate(req, res, next) {
   try {
     const name = req.body?.name?.trim();
     const content = req.body?.content?.trim();
-    if (!name || !content) {
-      return res.status(400).json({ error: 'name and content are required' });
+    const category = req.body?.category || 'MARKETING';
+    const language = req.body?.language || 'en_US';
+    const metaPayload = req.body?.metaPayload && typeof req.body.metaPayload === 'object' ? req.body.metaPayload : null;
+
+    if (!name) {
+      return res.status(400).json({ error: 'name is required' });
     }
+    const metaName = toMetaTemplateName(name, req.user.businessId);
+    if (!metaName) {
+      return res.status(400).json({ error: 'Template name is invalid for Meta' });
+    }
+
+    const payload = metaPayload
+      ? {
+          ...metaPayload,
+          name: metaName,
+          category: metaPayload.category || category,
+          language: metaPayload.language || language,
+        }
+      : {
+          name: metaName,
+          category,
+          language,
+          components: [
+            {
+              type: 'BODY',
+              text: toMetaTemplateBody(content || ''),
+            },
+          ],
+        };
+
+    const localContent = content || extractBodyTextFromComponents(payload.components || []);
+    if (!localContent) {
+      return res.status(400).json({ error: 'content or BODY component text is required' });
+    }
+
+    const createdMeta = await createWhatsAppTemplate({
+      payload,
+    });
     const template = await prisma.template.create({
       data: {
         businessId: req.user.businessId,
         name,
-        content,
-        status: 'WORKING',
+        content: localContent,
+        status: mapMetaStatusToLocal(createdMeta?.status),
       },
     });
-    res.status(201).json({ template });
+    res.status(201).json({ template, meta: createdMeta });
   } catch (e) {
     next(e);
   }
@@ -187,19 +410,21 @@ export async function createTemplate(req, res, next) {
 
 export async function updateTemplateStatus(req, res, next) {
   try {
-    const status = req.body?.status;
-    if (!['WORKING', 'NOT_WORKING'].includes(status)) {
-      return res.status(400).json({ error: 'status must be WORKING or NOT_WORKING' });
-    }
     const template = await prisma.template.findFirst({
       where: { id: req.params.id, businessId: req.user.businessId },
     });
     if (!template) return res.status(404).json({ error: 'Template not found' });
+    const metaName = toMetaTemplateName(template.name, req.user.businessId);
+    const metaTemplates = await listWhatsAppTemplates();
+    const meta = metaTemplates.find((t) => t.name === metaName);
+    if (!meta?.status) {
+      return res.status(404).json({ error: 'Template not found on Meta' });
+    }
     const updated = await prisma.template.update({
       where: { id: template.id },
-      data: { status },
+      data: { status: mapMetaStatusToLocal(meta.status) },
     });
-    res.json({ template: updated });
+    res.json({ template: updated, metaStatus: meta.status });
   } catch (e) {
     next(e);
   }
