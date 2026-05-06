@@ -7,16 +7,22 @@ export default function Bookings() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       try {
         const { data } = await api.get('/dashboard/bookings');
-        if (!cancelled) setRows(data);
+        if (!cancelled) {
+          setRows(Array.isArray(data) ? data : []);
+          setError('');
+        }
       } catch (e) {
         if (!cancelled) setError(e.response?.data?.error || 'Failed to load');
       }
-    })();
+    };
+    load();
+    const id = setInterval(load, 5000);
     return () => {
       cancelled = true;
+      clearInterval(id);
     };
   }, []);
 

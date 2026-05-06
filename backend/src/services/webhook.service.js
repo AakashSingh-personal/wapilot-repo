@@ -144,24 +144,42 @@ export async function handleInboundText({
   let replyText = '';
 
   if (pickedSlot) {
-    await prisma.booking.create({
-      data: {
-        customerId: customer.id,
+    let confirmed = false;
+    try {
+      await prisma.$transaction([
+        prisma.booking.create({
+          data: {
+            customerId: customer.id,
+            businessId: business.id,
+            service: pickedSlot.service,
+            slot: pickedSlot.slot,
+            status: 'CONFIRMED',
+          },
+        }),
+        prisma.lead.updateMany({
+          where: { customerId: customer.id, businessId: business.id },
+          data: { status: 'BOOKED' },
+        }),
+        prisma.customer.update({
+          where: { id: customer.id },
+          data: { bookingSlotSelectionPending: false },
+        }),
+      ]);
+      confirmed = true;
+    } catch (e) {
+      log('error', 'booking_create_failed', {
         businessId: business.id,
-        service: pickedSlot.service,
+        customerId: customer.id,
         slot: pickedSlot.slot,
-        status: 'CONFIRMED',
-      },
-    });
-    await prisma.lead.updateMany({
-      where: { customerId: customer.id, businessId: business.id },
-      data: { status: 'BOOKED' },
-    });
-    await prisma.customer.update({
-      where: { id: customer.id },
-      data: { bookingSlotSelectionPending: false },
-    });
-    replyText = `Booking confirmed for ${pickedSlot.slot}! 🎉 See you soon.`;
+        message: e.message,
+      });
+    }
+
+    if (confirmed) {
+      replyText = `Booking confirmed for ${pickedSlot.slot}! 🎉 See you soon.`;
+    } else {
+      replyText = `Sorry, booking confirm nahi ho payi.\n${formatSlotsMessage(slots)}`;
+    }
   } else if (intent === 'BOOKING') {
     await prisma.customer.update({
       where: { id: customer.id },
