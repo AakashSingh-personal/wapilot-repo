@@ -2,6 +2,7 @@ import { log } from '../utils/logger.js';
 import * as webhookService from '../services/webhook.service.js';
 import { prisma } from '../lib/prisma.js';
 import { verifyRazorpayWebhookSignature } from '../services/razorpay.service.js';
+import { sendWhatsAppText } from '../services/whatsapp.service.js';
 
 export function verifyWebhook(req, res) {
   const mode = req.query['hub.mode'];
@@ -189,7 +190,51 @@ export async function receiveRazorpayWebhook(req, res) {
     const event = req.body?.event || '';
     const payload = req.body?.payload || {};
 
+    const notifyCustomerPaymentStatus = async ({ customerPaymentId, status, amount }) => {
+      const cp = await prisma.customerPayment.findUnique({
+        where: { id: customerPaymentId },
+        select: { id: true, customerId: true, businessId: true },
+      });
+      if (!cp) return;
+      const customer = await prisma.customer.findFirst({
+        where: { id: cp.customerId, businessId: cp.businessId },
+        select: { id: true, phone: true },
+      });
+      const business = await prisma.business.findUnique({
+        where: { id: cp.businessId },
+        select: { id: true, phoneNumberId: true },
+      });
+      if (!customer?.phone || !business?.phoneNumberId) return;
+
+      const body =
+        status === 'PAID'
+          ? `Payment received successfully: Rs ${Number(amount).toFixed(2)}. Thank you! ✅`
+          : `Payment failed for Rs ${Number(amount).toFixed(2)}. You can ask me for a new payment link anytime.`;
+      try {
+        await sendWhatsAppText({
+          phoneNumberId: business.phoneNumberId,
+          toPhoneE164: customer.phone,
+          body,
+        });
+        await prisma.message.create({
+          data: {
+            customerId: customer.id,
+            businessId: cp.businessId,
+            type: 'BOT',
+            content: body,
+          },
+        });
+      } catch (e) {
+        log('warn', 'customer_payment_status_notify_failed', {
+          customerPaymentId,
+          status,
+          message: e.message,
+        });
+      }
+    };
+
     const creditWalletForCustomerPayment = async (customerPayment) => {
+      let paidNow = false;
       await prisma.$transaction(async (tx) => {
         const fresh = await tx.customerPayment.findUnique({ where: { id: customerPayment.id } });
         if (!fresh || fresh.status === 'PAID') return;
@@ -201,6 +246,7 @@ export async function receiveRazorpayWebhook(req, res) {
             providerPaymentId: customerPayment.providerPaymentId || undefined,
           },
         });
+        paidNow = true;
         const wallet = await tx.wallet.upsert({
           where: { businessId: customerPayment.businessId },
           update: {},
@@ -223,6 +269,7 @@ export async function receiveRazorpayWebhook(req, res) {
           },
         });
       });
+      return paidNow;
     };
 
     if (event === 'payment.captured') {
@@ -242,10 +289,17 @@ export async function receiveRazorpayWebhook(req, res) {
             where: { id: cp.id },
             data: { providerPaymentId: paymentId || null },
           });
-          await creditWalletForCustomerPayment({
+          const paidNow = await creditWalletForCustomerPayment({
             ...cp,
             providerPaymentId: paymentId || null,
           });
+          if (paidNow) {
+            await notifyCustomerPaymentStatus({
+              customerPaymentId: cp.id,
+              status: 'PAID',
+              amount: cp.amount,
+            });
+          }
         }
       }
       if (orderId && paymentId) {
@@ -328,10 +382,17 @@ export async function receiveRazorpayWebhook(req, res) {
             where: { id: cp.id },
             data: { providerPaymentId: paymentEntity?.id || null },
           });
-          await creditWalletForCustomerPayment({
+          const paidNow = await creditWalletForCustomerPayment({
             ...cp,
             providerPaymentId: paymentEntity?.id || null,
           });
+          if (paidNow) {
+            await notifyCustomerPaymentStatus({
+              customerPaymentId: cp.id,
+              status: 'PAID',
+              amount: cp.amount,
+            });
+          }
         }
       }
     }
@@ -339,6 +400,22 @@ export async function receiveRazorpayWebhook(req, res) {
     if (event === 'payment.failed') {
       const entity = payload?.payment?.entity;
       const orderId = entity?.order_id;
+      const notes = entity?.notes || {};
+      if (notes?.kind === 'customer_payment' && notes?.customerPaymentId) {
+        const cp = await prisma.customerPayment.findFirst({
+          where: {
+            id: String(notes.customerPaymentId),
+            businessId: String(notes.businessId || ''),
+          },
+        });
+        if (cp && cp.status !== 'PAID') {
+          await notifyCustomerPaymentStatus({
+            customerPaymentId: cp.id,
+            status: 'FAILED',
+            amount: cp.amount,
+          });
+        }
+      }
       if (orderId) {
         await prisma.payment.updateMany({
           where: { providerOrderId: orderId },

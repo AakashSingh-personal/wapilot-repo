@@ -269,6 +269,29 @@ export async function handleInboundText({
         conversationHistory: history,
       },
     );
+  } else if (intent === 'PAYMENT_STATUS') {
+    const latestPayment = await prisma.customerPayment.findFirst({
+      where: {
+        businessId: business.id,
+        customerId: customer.id,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        status: true,
+        amount: true,
+        provider: true,
+        providerLinkId: true,
+        createdAt: true,
+      },
+    });
+    if (!latestPayment) {
+      replyText = 'Aapka koi payment record abhi nahi mila. "I want to pay" bhej do, main link share karta hun.';
+    } else if (latestPayment.status === 'PAID') {
+      replyText = `Payment received: Rs ${Number(latestPayment.amount).toFixed(2)}.\nThank you! ✅`;
+    } else {
+      const created = new Date(latestPayment.createdAt).toLocaleString('en-IN');
+      replyText = `Your latest payment is still pending: Rs ${Number(latestPayment.amount).toFixed(2)}.\nRequested on ${created}.`;
+    }
   } else if (intent === 'PAYMENT') {
     const requestedAmount = extractRequestedAmountInInr(textBody);
     const selectedServiceAmount = inferAmountFromSelectedService({
