@@ -109,11 +109,12 @@ model User {
 }
 
 model Customer {
-  id         String   @id @default(uuid()) @db.Uuid
-  phone      String
-  name       String?
-  businessId String   @db.Uuid
-  createdAt  DateTime @default(now())
+  id                           String   @id @default(uuid()) @db.Uuid
+  phone                        String
+  name                         String?
+  businessId                   String   @db.Uuid
+  bookingSlotSelectionPending  Boolean  @default(false)
+  createdAt                    DateTime @default(now())
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   leads    Lead[]

@@ -53,7 +53,7 @@ function createLlmClient() {
 
 /**
  * @param {string} message
- * @param {{ services: unknown, products?: unknown, clientDetails?: string, workingHours: string, businessName: string }} businessConfig
+ * @param {{ services: unknown, products?: unknown, clientDetails?: string, workingHours: string, businessName: string, conversationHistory?: Array<{ type: string, content: string }> }} businessConfig
  */
 export async function generateAIReply(message, businessConfig) {
   let servicesText = '';
@@ -71,12 +71,20 @@ export async function generateAIReply(message, businessConfig) {
     productsText = '[]';
   }
   const clientDetails = String(businessConfig.clientDetails || '').trim();
+  const history = Array.isArray(businessConfig.conversationHistory)
+    ? businessConfig.conversationHistory
+        .slice(-12)
+        .map((m) => `${m.type === 'USER' ? 'Customer' : m.type === 'STAFF' ? 'Staff' : 'Bot'}: ${m.content}`)
+        .join('\n')
+    : '';
 
   const prompt = `You are a WhatsApp assistant for an Indian SMB "${businessConfig.businessName}".
 Reply in Hinglish or English. Keep it under 2 lines. Be helpful, polite, and clear.
 Business/client details: ${clientDetails || 'Not provided'}
 Use only these services (JSON): ${servicesText}
 Use only these products (JSON): ${productsText}
+Previous conversation (latest context, use this to stay in context):
+${history || 'No prior context available.'}
 If details are missing, ask one concise follow-up question.
 Customer message: ${message}`;
 

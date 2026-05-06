@@ -64,6 +64,11 @@ function structuredContent(payload) {
   return `${MESSAGE_PREFIX}${JSON.stringify(payload)}`;
 }
 
+function isCancelBookingMessage(text) {
+  const t = String(text || '').toLowerCase();
+  return /\b(cancel|stop|not now|later|leave it|no booking)\b/.test(t);
+}
+
 async function resolveInboundContext({ phoneNumberId, fromWaId, contactName }) {
   const business = await findBusinessByPhoneNumberId(phoneNumberId);
   if (!business) {
@@ -92,6 +97,16 @@ async function resolveInboundContext({ phoneNumberId, fromWaId, contactName }) {
   }
 
   return { business, customer, phone };
+}
+
+async function recentConversation(customerId, businessId, limit = 12) {
+  const rows = await prisma.message.findMany({
+    where: { customerId, businessId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: { type: true, content: true },
+  });
+  return rows.reverse();
 }
 
 /**
@@ -125,6 +140,7 @@ export async function handleInboundText({
   const slots = parseSlotsFromConfig(cfg.workingHours);
   const pickedSlot = matchSlotSelection(textBody, slots);
   const intent = detectIntent(textBody);
+  const history = await recentConversation(customer.id, business.id, 12);
   let replyText = '';
 
   if (pickedSlot) {
@@ -141,9 +157,25 @@ export async function handleInboundText({
       where: { customerId: customer.id, businessId: business.id },
       data: { status: 'BOOKED' },
     });
+    await prisma.customer.update({
+      where: { id: customer.id },
+      data: { bookingSlotSelectionPending: false },
+    });
     replyText = `Booking confirmed for ${pickedSlot.slot}! 🎉 See you soon.`;
   } else if (intent === 'BOOKING') {
+    await prisma.customer.update({
+      where: { id: customer.id },
+      data: { bookingSlotSelectionPending: true },
+    });
     replyText = formatSlotsMessage(slots);
+  } else if (customer.bookingSlotSelectionPending && isCancelBookingMessage(textBody)) {
+    await prisma.customer.update({
+      where: { id: customer.id },
+      data: { bookingSlotSelectionPending: false },
+    });
+    replyText = 'No problem, booking request cancelled. Jab chaho message kar do.';
+  } else if (customer.bookingSlotSelectionPending) {
+    replyText = `I am still holding your booking request.\n${formatSlotsMessage(slots)}`;
   } else if (intent === 'PRICE_QUERY') {
     replyText = await generateAIReply(
       `Customer asked about pricing. Answer using only services/products JSON. Message: ${textBody}`,
@@ -153,6 +185,7 @@ export async function handleInboundText({
         clientDetails: knowledge.clientDetails,
         workingHours: cfg.workingHours,
         businessName: business.name,
+        conversationHistory: history,
       },
     );
   } else if (intent === 'PAYMENT') {
@@ -187,6 +220,7 @@ export async function handleInboundText({
       clientDetails: knowledge.clientDetails,
       workingHours: cfg.workingHours,
       businessName: business.name,
+      conversationHistory: history,
     });
   }
 

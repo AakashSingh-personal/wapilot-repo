@@ -252,6 +252,8 @@ export async function receiveRazorpayWebhook(req, res) {
         const payment = await prisma.payment.findFirst({ where: { providerOrderId: orderId } });
         if (payment && payment.status !== 'SUCCESS' && payment.type === 'WALLET_TOPUP') {
           await prisma.$transaction(async (tx) => {
+            const fresh = await tx.payment.findUnique({ where: { id: payment.id } });
+            if (!fresh || fresh.status === 'SUCCESS') return;
             await tx.payment.update({
               where: { id: payment.id },
               data: {
