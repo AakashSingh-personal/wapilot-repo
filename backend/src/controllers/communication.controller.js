@@ -56,6 +56,27 @@ function extractBodyTextFromComponents(components = []) {
   return typeof body?.text === 'string' ? body.text : '';
 }
 
+function normalizeMetaComponents(components) {
+  if (!Array.isArray(components)) return [];
+  return components.map((component) => {
+    if (!component || typeof component !== 'object') return component;
+    const next = { ...component };
+    if (typeof next.text === 'string') {
+      next.text = toMetaTemplateBody(next.text);
+    }
+    if (Array.isArray(next.buttons)) {
+      next.buttons = next.buttons.map((button) => {
+        if (!button || typeof button !== 'object') return button;
+        const b = { ...button };
+        if (typeof b.text === 'string') b.text = b.text.trim();
+        if (typeof b.url === 'string') b.url = b.url.trim();
+        return b;
+      });
+    }
+    return next;
+  });
+}
+
 const META_TEMPLATE_OPTIONS = {
   categories: ['MARKETING', 'UTILITY', 'AUTHENTICATION'],
   languages: [
@@ -373,6 +394,7 @@ export async function createTemplate(req, res, next) {
           name: metaName,
           category: metaPayload.category || category,
           language: metaPayload.language || language,
+          components: normalizeMetaComponents(metaPayload.components || []),
         }
       : {
           name: metaName,
@@ -404,6 +426,10 @@ export async function createTemplate(req, res, next) {
     });
     res.status(201).json({ template, meta: createdMeta });
   } catch (e) {
+    if (typeof e?.message === 'string' && e.message.includes('Meta template create failed:')) {
+      e.statusCode = 400;
+      e.publicMessage = e.message.replace('Meta template create failed:', '').trim();
+    }
     next(e);
   }
 }
