@@ -7,9 +7,8 @@ import {
   matchSlotSelection,
   parseSlotsFromConfig,
 } from './bookingSlots.service.js';
-import { sendWhatsAppImageFromBuffer, sendWhatsAppText } from './whatsapp.service.js';
-import { buildUpiLink } from '../utils/upi.js';
-import { qrPngBuffer } from './qrcode.service.js';
+import { sendWhatsAppText } from './whatsapp.service.js';
+import { createRazorpayPaymentLink } from './razorpay.service.js';
 
 const MESSAGE_PREFIX = 'WA_MSG:';
 
@@ -67,6 +66,13 @@ function structuredContent(payload) {
 function isCancelBookingMessage(text) {
   const t = String(text || '').toLowerCase();
   return /\b(cancel|stop|not now|later|leave it|no booking)\b/.test(t);
+}
+
+function extractRequestedAmountInInr(text) {
+  const m = String(text || '').match(/(?:rs\.?|inr|₹)\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:rs\.?|inr|₹)/i);
+  const val = Number(m?.[1] || m?.[2]);
+  if (!Number.isFinite(val) || val <= 0) return null;
+  return Math.round(val * 100) / 100;
 }
 
 async function resolveInboundContext({ phoneNumberId, fromWaId, contactName }) {
@@ -207,29 +213,43 @@ export async function handleInboundText({
       },
     );
   } else if (intent === 'PAYMENT') {
-    const upi = cfg.upiId?.trim();
-    if (!upi) {
-      replyText =
-        'Payment link abhi setup nahi hai. Owner se contact karein — thanks!';
-    } else {
-      const defaultAmt = '100';
-      const link = buildUpiLink({
-        pa: upi,
-        pn: business.name.slice(0, 50),
-        am: defaultAmt,
+    const requestedAmount = extractRequestedAmountInInr(textBody);
+    const amountInInr = requestedAmount || 100;
+    try {
+      const cp = await prisma.customerPayment.create({
+        data: {
+          businessId: business.id,
+          customerId: customer.id,
+          amount: amountInInr.toFixed(2),
+          status: 'PENDING',
+          provider: 'RAZORPAY',
+        },
       });
-      try {
-        const buf = await qrPngBuffer(link);
-        await sendWhatsAppImageFromBuffer({
-          phoneNumberId: business.phoneNumberId,
-          toPhoneE164: phone,
-          buffer: buf,
-        });
-        replyText = 'Scan & pay via UPI 🙏 Dhanyavaad!';
-      } catch (e) {
-        log('error', 'payment_qr_send_failed', { message: e.message });
-        replyText = `Pay via UPI:\n${link}`;
-      }
+      const paymentLink = await createRazorpayPaymentLink({
+        amountInInr,
+        description: `Payment for ${business.name}`,
+        customer: {
+          name: customer.name || undefined,
+          contact: customer.phone ? customer.phone.replace(/^\+/, '') : undefined,
+        },
+        notes: {
+          kind: 'customer_payment',
+          customerPaymentId: cp.id,
+          businessId: business.id,
+        },
+      });
+      await prisma.customerPayment.update({
+        where: { id: cp.id },
+        data: { providerLinkId: paymentLink.id },
+      });
+      replyText = `Please complete payment here: ${paymentLink.short_url}\nAmount: Rs ${amountInInr.toFixed(2)}`;
+    } catch (e) {
+      log('error', 'payment_link_create_failed', {
+        businessId: business.id,
+        customerId: customer.id,
+        message: e.message,
+      });
+      replyText = 'Payment link abhi generate nahi ho pa raha. Please try again in a moment.';
     }
   } else {
     replyText = await generateAIReply(textBody, {
