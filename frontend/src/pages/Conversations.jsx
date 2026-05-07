@@ -74,7 +74,7 @@ function bubbleMeta(type) {
 
 function statusTick(status) {
   const s = String(status || '').toLowerCase();
-  if (s === 'read') return { type: 'double', cls: 'text-sky-200 dark:text-sky-300' };
+  if (s === 'read') return { type: 'double', cls: 'text-[#53bdeb]' };
   if (s === 'delivered') return { type: 'double', cls: 'text-white/80' };
   if (s === 'sent') return { type: 'single', cls: 'text-white/80' };
   if (s === 'pending') return { type: 'pending', cls: 'text-white/75' };
@@ -88,14 +88,47 @@ function StatusMarker({ marker }) {
   }
 
   if (marker.type === 'single') {
-    return <span className={`${marker.cls} text-[13px] font-black leading-none tracking-[-0.02em] -mb-px`}>✓</span>;
+    return (
+      <svg
+        className={`${marker.cls} h-[13px] w-[13px] -mb-px`}
+        viewBox="0 0 12 12"
+        aria-label="sent"
+      >
+        <polyline
+          points="1.5,6.5 4.3,9.2 10.5,2.2"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
   }
 
   return (
-    <span className={`inline-flex items-center ${marker.cls} text-[13px] font-black leading-none -mb-px`} aria-label="delivered">
-      <span className="tracking-[-0.07em]">✓</span>
-      <span className="-ml-[3px] tracking-[-0.07em]">✓</span>
-    </span>
+    <svg
+      className={`${marker.cls} h-[13px] w-[18px] -mb-px`}
+      viewBox="0 0 18 12"
+      aria-label="delivered"
+    >
+      <polyline
+        points="1.2,6.6 4,9.2 9.6,2.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <polyline
+        points="7,6.6 9.8,9.2 15.4,2.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
