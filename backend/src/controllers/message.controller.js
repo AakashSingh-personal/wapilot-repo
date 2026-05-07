@@ -1,11 +1,17 @@
 import { prisma } from '../lib/prisma.js';
-import { sendWhatsAppText } from '../services/whatsapp.service.js';
+import { sendWhatsAppImageUrl, sendWhatsAppText } from '../services/whatsapp.service.js';
+
+const MESSAGE_PREFIX = 'WA_MSG:';
+
+function structuredContent(payload) {
+  return `${MESSAGE_PREFIX}${JSON.stringify(payload)}`;
+}
 
 export async function sendMessage(req, res, next) {
   try {
-    const { customerId, content } = req.body || {};
-    if (!customerId || !content) {
-      return res.status(400).json({ error: 'customerId and content required' });
+    const { customerId, content, imageUrl } = req.body || {};
+    if (!customerId || (!content && !imageUrl)) {
+      return res.status(400).json({ error: 'customerId and either content or imageUrl required' });
     }
 
     const [customer, business] = await Promise.all([
@@ -23,19 +29,68 @@ export async function sendMessage(req, res, next) {
       });
     }
 
-    await prisma.message.create({
+    const isImage = Boolean(imageUrl);
+    const created = await prisma.message.create({
       data: {
         customerId,
         businessId: req.user.businessId,
-        content,
+        content: structuredContent(
+          isImage
+            ? {
+                kind: 'image',
+                imageUrl,
+                caption: content || '',
+                direction: 'outbound',
+                status: 'pending',
+                source: 'catalog',
+              }
+            : {
+                kind: 'text',
+                text: content,
+                direction: 'outbound',
+                status: 'pending',
+              },
+        ),
         type: 'STAFF',
       },
     });
 
-    await sendWhatsAppText({
-      phoneNumberId,
-      toPhoneE164: customer.phone,
-      body: content,
+    const sendRes = isImage
+      ? await sendWhatsAppImageUrl({
+          phoneNumberId,
+          toPhoneE164: customer.phone,
+          imageUrl,
+          caption: content || '',
+        })
+      : await sendWhatsAppText({
+          phoneNumberId,
+          toPhoneE164: customer.phone,
+          body: content,
+        });
+    const waMessageId = sendRes?.messages?.[0]?.id;
+    await prisma.message.update({
+      where: { id: created.id },
+      data: {
+        content: structuredContent(
+          isImage
+            ? {
+                kind: 'image',
+                imageUrl,
+                caption: content || '',
+                direction: 'outbound',
+                status: 'sent',
+                waMessageId: waMessageId || undefined,
+                source: 'catalog',
+              }
+            : {
+                kind: 'text',
+                text: content,
+                direction: 'outbound',
+                status: 'sent',
+                waMessageId: waMessageId || undefined,
+              },
+        ),
+      },
     });
 
     res.json({ ok: true });

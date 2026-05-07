@@ -72,6 +72,15 @@ function bubbleMeta(type) {
   return { align: 'right', label: 'Auto-reply', bubble: 'bot' };
 }
 
+function statusTick(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'read') return { text: '✓✓', cls: 'text-sky-500' };
+  if (s === 'delivered') return { text: '✓✓', cls: 'text-slate-400' };
+  if (s === 'sent') return { text: '✓', cls: 'text-slate-400' };
+  if (s === 'pending') return { text: '⏳', cls: 'text-slate-400' };
+  return null;
+}
+
 export default function Conversations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const paramCustomerId = searchParams.get('customer');
@@ -85,6 +94,8 @@ export default function Conversations() {
   const [loadingSend, setLoadingSend] = useState(false);
   const [loadingThreads, setLoadingThreads] = useState(true);
   const [mediaUrls, setMediaUrls] = useState({});
+  const [catalogItems, setCatalogItems] = useState([]);
+  const [showCatalog, setShowCatalog] = useState(false);
 
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -147,6 +158,31 @@ export default function Conversations() {
       cancelled = true;
     };
   }, [loadThreads, paramCustomerId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get('/config');
+        if (cancelled) return;
+        const services = Array.isArray(data?.config?.services) ? data.config.services : [];
+        const products = Array.isArray(data?.config?.products) ? data.config.products : [];
+        const merged = [...services, ...products]
+          .map((x) => ({
+            name: x?.name || x?.title || '',
+            imageUrl: x?.imageUrl || x?.image || '',
+            description: x?.description || '',
+          }))
+          .filter((x) => x.name && x.imageUrl);
+        setCatalogItems(merged);
+      } catch {
+        // Keep chat usable if catalog load fails.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -235,6 +271,26 @@ export default function Conversations() {
       await loadThreads();
     } catch (e) {
       setError(e.response?.data?.error || 'Send failed — check WhatsApp token / phone number id');
+    } finally {
+      setLoadingSend(false);
+    }
+  }
+
+  async function sendFromCatalog(item) {
+    if (!selectedId || !item?.imageUrl) return;
+    setLoadingSend(true);
+    setError('');
+    try {
+      await api.post('/send-message', {
+        customerId: selectedId,
+        imageUrl: item.imageUrl,
+        content: item.name,
+      });
+      setShowCatalog(false);
+      await loadMessages(selectedId);
+      await loadThreads();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Catalog send failed');
     } finally {
       setLoadingSend(false);
     }
@@ -357,11 +413,13 @@ export default function Conversations() {
                       const mediaSrc = parsed.mediaId ? mediaUrls[parsed.mediaId] : '';
 
                       if (parsed.kind === 'image') {
+                        const resolvedImageSrc = mediaSrc || parsed.imageUrl || '';
+                        const fromCatalog = parsed.source === 'product' || parsed.source === 'service';
                         return (
                           <div className="space-y-2">
-                            {mediaSrc ? (
+                            {resolvedImageSrc ? (
                               <img
-                                src={mediaSrc}
+                                src={resolvedImageSrc}
                                 alt={parsed.caption || 'Customer image'}
                                 className="max-h-72 rounded-xl border border-slate-200 dark:border-slate-700 object-contain bg-black/5"
                               />
@@ -370,6 +428,18 @@ export default function Conversations() {
                             )}
                             {parsed.caption ? (
                               <div className="whitespace-pre-wrap break-words">{parsed.caption}</div>
+                            ) : null}
+                            {fromCatalog ? (
+                              <div
+                                className={[
+                                  'inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                                  incoming
+                                    ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                                    : 'bg-white/20 text-white',
+                                ].join(' ')}
+                              >
+                                Sent from catalog
+                              </div>
                             ) : null}
                           </div>
                         );
@@ -488,11 +558,18 @@ export default function Conversations() {
                     })()}
                     <div
                       className={[
-                        'text-[10px] mt-1 opacity-70',
+                        'text-[10px] mt-1 opacity-70 flex items-center gap-1',
                         incoming ? 'text-slate-400' : 'text-white/70',
                       ].join(' ')}
                     >
-                      {new Date(m.createdAt).toLocaleString()}
+                      <span>{new Date(m.createdAt).toLocaleString()}</span>
+                      {(() => {
+                        if (incoming) return null;
+                        const parsed = parseMessageContent(m.content);
+                        const marker = statusTick(parsed.status);
+                        if (!marker) return null;
+                        return <span className={marker.cls}>{marker.text}</span>;
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -511,6 +588,14 @@ export default function Conversations() {
             <div ref={messagesEndRef} />
           </div>
           <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex gap-2">
+            <button
+              type="button"
+              disabled={!selected || loadingSend}
+              onClick={() => setShowCatalog((v) => !v)}
+              className="self-end rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-semibold disabled:opacity-50 shrink-0"
+            >
+              Send from catalog
+            </button>
             <textarea
               rows={2}
               className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm resize-none"
@@ -534,6 +619,29 @@ export default function Conversations() {
               {loadingSend ? '…' : 'Send'}
             </button>
           </div>
+          {showCatalog && (
+            <div className="px-3 pb-3">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-2 max-h-44 overflow-y-auto space-y-2">
+                {catalogItems.map((item) => (
+                  <button
+                    key={`${item.name}-${item.imageUrl}`}
+                    type="button"
+                    onClick={() => sendFromCatalog(item)}
+                    className="w-full text-left rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2 py-2 flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <img src={item.imageUrl} alt={item.name} className="h-10 w-10 rounded object-cover" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold truncate">{item.name}</div>
+                      <div className="text-[11px] text-slate-500 truncate">{item.description || item.imageUrl}</div>
+                    </div>
+                  </button>
+                ))}
+                {!catalogItems.length && (
+                  <div className="text-xs text-slate-500 px-2 py-1">No catalog images found in Settings.</div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

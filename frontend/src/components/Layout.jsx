@@ -9,7 +9,10 @@ const nav = [
   { to: '/conversations', label: 'Chats', icon: '💬' },
   { to: '/bookings', label: 'Bookings', icon: '📅' },
   { to: '/payments', label: 'Payments', icon: '💳' },
-  { to: '/communications', label: 'Communications', icon: '📣' },
+  { to: '/communications/wallet', label: 'Wallet', icon: '💰' },
+  { to: '/communications/send', label: 'Send Communication', icon: '📤' },
+  { to: '/communications/templates', label: 'Templates', icon: '🧩' },
+  { to: '/communications/contacts', label: 'Upload Contacts', icon: '📇' },
   { to: '/billing', label: 'Billing', icon: '🧾' },
   { to: '/settings', label: 'Settings', icon: '⚙️' },
 ];

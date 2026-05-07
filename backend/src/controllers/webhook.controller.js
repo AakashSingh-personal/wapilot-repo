@@ -32,8 +32,16 @@ export async function receiveWebhook(req, res) {
         const phoneNumberId =
           rawPid !== undefined && rawPid !== null ? String(rawPid).trim() : '';
         const messages = value?.messages || [];
+        const statuses = value?.statuses || [];
         const contacts = value?.contacts || [];
         const contactName = contacts[0]?.profile?.name;
+
+        if (statuses.length) {
+          await webhookService.handleWhatsAppStatuses({
+            phoneNumberId: phoneNumberId || undefined,
+            statuses,
+          });
+        }
 
         for (const msg of messages) {
           const from = msg.from;

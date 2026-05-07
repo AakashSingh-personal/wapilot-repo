@@ -56,7 +56,12 @@ export default function App() {
         <Route path="/conversations" element={<Conversations />} />
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/payments" element={<Payments />} />
-        <Route path="/communications" element={<Communications />} />
+        <Route path="/communications" element={<Navigate to="/communications/wallet" replace />} />
+        <Route path="/communications/wallet" element={<Communications forcedTab="WALLET" />} />
+        <Route path="/communications/send" element={<Communications forcedTab="SEND" />} />
+        <Route path="/communications/templates" element={<Communications forcedTab="TEMPLATES" templateMode="list" />} />
+        <Route path="/communications/templates/create" element={<Communications forcedTab="TEMPLATES" templateMode="create" />} />
+        <Route path="/communications/contacts" element={<Communications forcedTab="CONTACTS" />} />
         <Route path="/billing" element={<Billing />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

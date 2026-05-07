@@ -53,6 +53,45 @@ export async function sendWhatsAppText({ phoneNumberId, toPhoneE164, body }) {
 }
 
 /**
+ * Send WhatsApp image using public URL.
+ */
+export async function sendWhatsAppImageUrl({ phoneNumberId, toPhoneE164, imageUrl, caption = '' }) {
+  const pid = resolvePhoneNumberId(phoneNumberId);
+  const t = token();
+  if (!t || !pid) {
+    log('warn', 'whatsapp_image_url_skipped_no_config');
+    return { skipped: true };
+  }
+  if (!imageUrl) {
+    throw new Error('imageUrl is required');
+  }
+  const url = `${GRAPH}/${pid}/messages`;
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: toPhoneE164.replace(/^\+/, ''),
+    type: 'image',
+    image: {
+      link: imageUrl,
+      ...(caption ? { caption } : {}),
+    },
+  };
+  try {
+    const res = await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${t}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    return res.data;
+  } catch (e) {
+    log('error', 'whatsapp_image_url_failed', {
+      message: e.response?.data ? JSON.stringify(e.response.data) : e.message,
+    });
+    throw e;
+  }
+}
+
+/**
  * Upload media then send image by id (QR PNG).
  */
 export async function sendWhatsAppImageFromBuffer({ phoneNumberId, toPhoneE164, buffer, mimeType = 'image/png' }) {

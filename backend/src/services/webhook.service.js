@@ -7,7 +7,7 @@ import {
   matchSlotSelection,
   parseSlotsFromConfig,
 } from './bookingSlots.service.js';
-import { sendWhatsAppText } from './whatsapp.service.js';
+import { sendWhatsAppImageUrl, sendWhatsAppText } from './whatsapp.service.js';
 import { createRazorpayPaymentLink } from './razorpay.service.js';
 
 const MESSAGE_PREFIX = 'WA_MSG:';
@@ -63,6 +63,23 @@ function structuredContent(payload) {
   return `${MESSAGE_PREFIX}${JSON.stringify(payload)}`;
 }
 
+function parseStructuredContent(raw) {
+  if (typeof raw !== 'string' || !raw.startsWith(MESSAGE_PREFIX)) return null;
+  try {
+    return JSON.parse(raw.slice(MESSAGE_PREFIX.length));
+  } catch {
+    return null;
+  }
+}
+
+function statusRank(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'read') return 3;
+  if (s === 'delivered') return 2;
+  if (s === 'sent') return 1;
+  return 0;
+}
+
 function isCancelBookingMessage(text) {
   const t = String(text || '').toLowerCase();
   return /\b(cancel|stop|not now|later|leave it|no booking)\b/.test(t);
@@ -106,6 +123,33 @@ function serviceCatalogEntries(services) {
       return { name, amount };
     })
     .filter(Boolean);
+}
+
+function imageCatalogEntries(items, source) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const name = String(item.name || item.title || '').trim();
+      const imageUrl = String(item.imageUrl || item.image || '').trim();
+      if (!name || !/^https?:\/\/\S+$/i.test(imageUrl)) return null;
+      return { name, imageUrl, source };
+    })
+    .filter(Boolean);
+}
+
+function pickRelevantCatalogImage({ text, services, products }) {
+  const lower = String(text || '').toLowerCase();
+  if (!lower) return null;
+  const entries = [
+    ...imageCatalogEntries(services, 'service'),
+    ...imageCatalogEntries(products, 'product'),
+  ];
+  if (!entries.length) return null;
+  const matched = entries
+    .filter((entry) => lower.includes(entry.name.toLowerCase()))
+    .sort((a, b) => b.name.length - a.name.length);
+  return matched[0] || null;
 }
 
 function inferAmountFromSelectedService({ text, history, services }) {
@@ -347,26 +391,115 @@ export async function handleInboundText({
     });
   }
 
-  await prisma.message.create({
+  const outgoingText = await prisma.message.create({
     data: {
       customerId: customer.id,
       businessId: business.id,
-      content: replyText,
+      content: structuredContent({
+        kind: 'text',
+        text: replyText,
+        direction: 'outbound',
+        status: 'pending',
+      }),
       type: 'BOT',
     },
   });
 
   try {
-    await sendWhatsAppText({
+    const sent = await sendWhatsAppText({
       phoneNumberId: business.phoneNumberId,
       toPhoneE164: phone,
       body: replyText,
     });
+    const waMessageId = sent?.messages?.[0]?.id;
+    await prisma.message.update({
+      where: { id: outgoingText.id },
+      data: {
+        content: structuredContent({
+          kind: 'text',
+          text: replyText,
+          direction: 'outbound',
+          status: 'sent',
+          waMessageId: waMessageId || undefined,
+        }),
+      },
+    });
+
+    const pickedImage = pickRelevantCatalogImage({
+      text: `${textBody}\n${replyText}`,
+      services: knowledge.services,
+      products: knowledge.products,
+    });
+    if (pickedImage?.imageUrl) {
+      const caption = `${pickedImage.name}`;
+      const imgSent = await sendWhatsAppImageUrl({
+        phoneNumberId: business.phoneNumberId,
+        toPhoneE164: phone,
+        imageUrl: pickedImage.imageUrl,
+        caption,
+      });
+      const imageWaMessageId = imgSent?.messages?.[0]?.id;
+      await prisma.message.create({
+        data: {
+          customerId: customer.id,
+          businessId: business.id,
+          content: structuredContent({
+            kind: 'image',
+            imageUrl: pickedImage.imageUrl,
+            caption,
+            source: pickedImage.source,
+            direction: 'outbound',
+            status: 'sent',
+            waMessageId: imageWaMessageId || undefined,
+          }),
+          type: 'BOT',
+        },
+      });
+    }
   } catch (e) {
     log('error', 'webhook_reply_send_failed', { message: e.message });
   }
 
   return { ok: true };
+}
+
+export async function handleWhatsAppStatuses({ phoneNumberId, statuses = [] }) {
+  if (!Array.isArray(statuses) || !statuses.length) return { ok: true, updated: 0 };
+  const business = await findBusinessByPhoneNumberId(phoneNumberId);
+  let updated = 0;
+  for (const st of statuses) {
+    const waMessageId = String(st?.id || '').trim();
+    const nextStatus = String(st?.status || '').toLowerCase();
+    if (!waMessageId || !['sent', 'delivered', 'read'].includes(nextStatus)) continue;
+    const existing = await prisma.message.findFirst({
+      where: {
+        ...(business?.id ? { businessId: business.id } : {}),
+        type: { in: ['BOT', 'STAFF'] },
+        OR: [
+          { content: { contains: `"waMessageId":"${waMessageId}"` } },
+          { content: { contains: `"waMessageId": "${waMessageId}"` } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!existing) continue;
+    const parsed = parseStructuredContent(existing.content);
+    if (!parsed || parsed.direction !== 'outbound') continue;
+    const current = String(parsed.status || '').toLowerCase();
+    if (statusRank(nextStatus) <= statusRank(current)) continue;
+    await prisma.message.update({
+      where: { id: existing.id },
+      data: {
+        content: structuredContent({
+          ...parsed,
+          status: nextStatus,
+          waMessageId,
+        }),
+      },
+    });
+    updated += 1;
+  }
+  return { ok: true, updated };
 }
 
 /**

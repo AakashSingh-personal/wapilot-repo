@@ -136,7 +136,7 @@ async function syncTemplateStatusesFromMeta(businessId) {
   const updates = [];
   for (const t of local) {
     const metaName = toMetaTemplateName(t.name, businessId);
-    const meta = byName.get(metaName);
+    const meta = byName.get(metaName) || byName.get(t.name);
     if (!meta?.status) continue;
     const nextStatus = mapMetaStatusToLocal(meta.status);
     if (nextStatus !== t.status) {
@@ -363,16 +363,57 @@ export async function uploadContacts(req, res, next) {
 
 export async function listTemplates(req, res, next) {
   try {
+    let metaTemplates = [];
+    let metaSyncError = null;
     try {
-      await syncTemplateStatusesFromMeta(req.user.businessId);
-    } catch {
+      metaTemplates = await listWhatsAppTemplates();
+      const byName = new Map(metaTemplates.map((t) => [t.name, t]));
+      const localForSync = await prisma.template.findMany({
+        where: { businessId: req.user.businessId },
+        select: { id: true, name: true, status: true },
+      });
+      const updates = [];
+      for (const t of localForSync) {
+        const metaName = toMetaTemplateName(t.name, req.user.businessId);
+        const meta = byName.get(metaName) || byName.get(t.name);
+        if (!meta?.status) continue;
+        const nextStatus = mapMetaStatusToLocal(meta.status);
+        if (nextStatus !== t.status) {
+          updates.push(
+            prisma.template.update({
+              where: { id: t.id },
+              data: { status: nextStatus },
+            }),
+          );
+        }
+      }
+      if (updates.length) await prisma.$transaction(updates);
+    } catch (err) {
+      metaSyncError = err?.message || 'Meta sync failed';
       // Keep local templates usable even when Meta status sync fails.
+      try {
+        await syncTemplateStatusesFromMeta(req.user.businessId);
+      } catch {
+        // ignore fallback sync failure
+      }
     }
+
     const templates = await prisma.template.findMany({
       where: { businessId: req.user.businessId },
       orderBy: { createdAt: 'desc' },
     });
-    res.json(templates);
+    const byMetaName = new Map((metaTemplates || []).map((t) => [t.name, t]));
+    const withMeta = templates.map((t) => {
+      const metaName = toMetaTemplateName(t.name, req.user.businessId);
+      const meta = byMetaName.get(metaName) || byMetaName.get(t.name) || null;
+      return {
+        ...t,
+        metaName,
+        metaStatus: meta?.status || null,
+        metaCategory: meta?.category || null,
+      };
+    });
+    res.json({ templates: withMeta, metaSyncError });
   } catch (e) {
     next(e);
   }
@@ -471,7 +512,7 @@ export async function updateTemplateStatus(req, res, next) {
     if (!template) return res.status(404).json({ error: 'Template not found' });
     const metaName = toMetaTemplateName(template.name, req.user.businessId);
     const metaTemplates = await listWhatsAppTemplates();
-    const meta = metaTemplates.find((t) => t.name === metaName);
+    const meta = metaTemplates.find((t) => t.name === metaName || t.name === template.name);
     if (!meta?.status) {
       return res.status(404).json({ error: 'Template not found on Meta' });
     }

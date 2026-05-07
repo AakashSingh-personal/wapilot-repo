@@ -9,17 +9,20 @@ function normalizeItems(input) {
         name: item.name || item.title || '',
         price: item.price || '',
         description: item.description || item.details || '',
+        imageUrl: item.imageUrl || item.image || '',
       };
     }
-    return { name: String(item || ''), price: '', description: '' };
+    return { name: String(item || ''), price: '', description: '', imageUrl: '' };
   });
 }
 
 function emptyItem() {
-  return { name: '', price: '', description: '' };
+  return { name: '', price: '', description: '', imageUrl: '' };
 }
 
 function CatalogEditor({ title, items, onChange, addLabel }) {
+  const [uploadingIndex, setUploadingIndex] = useState(-1);
+
   function updateAt(index, key, value) {
     const next = items.map((it, i) => (i === index ? { ...it, [key]: value } : it));
     onChange(next);
@@ -48,6 +51,29 @@ function CatalogEditor({ title, items, onChange, addLabel }) {
     if (!source) return;
     const clone = { ...source };
     onChange([...items.slice(0, index + 1), clone, ...items.slice(index + 1)]);
+  }
+
+  async function uploadItemImage(index, file) {
+    if (!file) return;
+    setUploadingIndex(index);
+    try {
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('File read failed'));
+        reader.readAsDataURL(file);
+      });
+      const { data } = await api.post('/media/upload', {
+        base64Data,
+        mimeType: file.type || 'application/octet-stream',
+        fileName: file.name,
+      });
+      updateAt(index, 'imageUrl', data.publicUrl || '');
+    } catch {
+      // Leave field unchanged on upload failure.
+    } finally {
+      setUploadingIndex(-1);
+    }
   }
 
   return (
@@ -89,6 +115,30 @@ function CatalogEditor({ title, items, onChange, addLabel }) {
               onChange={(e) => updateAt(index, 'description', e.target.value)}
               placeholder="Short description"
             />
+            <div className="space-y-2">
+              <input
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                value={item.imageUrl || ''}
+                onChange={(e) => updateAt(index, 'imageUrl', e.target.value)}
+                placeholder="Image URL (optional)"
+              />
+              <div className="flex items-center gap-3 text-xs">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => uploadItemImage(index, e.target.files?.[0])}
+                  className="text-xs"
+                />
+                {uploadingIndex === index && <span className="text-slate-500">Uploading image...</span>}
+              </div>
+              {item.imageUrl ? (
+                <img
+                  src={item.imageUrl}
+                  alt={item.name || `${title} image`}
+                  className="h-20 w-20 rounded-lg object-cover border border-slate-200 dark:border-slate-700"
+                />
+              ) : null}
+            </div>
             <div className="flex items-center gap-3 text-xs">
               <button
                 type="button"
@@ -190,16 +240,18 @@ export default function Settings() {
         name: item.name?.trim() || '',
         price: item.price?.trim() || '',
         description: item.description?.trim() || '',
+        imageUrl: item.imageUrl?.trim() || '',
       }))
-      .filter((item) => item.name || item.price || item.description);
+      .filter((item) => item.name || item.price || item.description || item.imageUrl);
 
     const cleanProducts = products
       .map((item) => ({
         name: item.name?.trim() || '',
         price: item.price?.trim() || '',
         description: item.description?.trim() || '',
+        imageUrl: item.imageUrl?.trim() || '',
       }))
-      .filter((item) => item.name || item.price || item.description);
+      .filter((item) => item.name || item.price || item.description || item.imageUrl);
 
     try {
       await api.put('/config', {

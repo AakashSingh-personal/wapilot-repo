@@ -31,8 +31,9 @@ export function createApp() {
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
-  app.use('/webhook', express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }), webhookRoutes);
-  app.use(express.json());
+  app.use('/webhook', express.json({ limit: '5mb', verify: (req, _res, buf) => { req.rawBody = buf; } }), webhookRoutes);
+  // Media uploads can send base64 payloads in JSON, which exceed Express default 100kb limit.
+  app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
 
   app.use('/auth', authRoutes);
   app.use('/dashboard', dashboardRoutes);

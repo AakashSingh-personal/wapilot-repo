@@ -1,8 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api.js';
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function metaStatusBadgeClass(status) {
+  const normalized = String(status || '').toUpperCase();
+  if (normalized === 'APPROVED') {
+    return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
+  }
+  if (normalized === 'PENDING' || normalized === 'IN_REVIEW') {
+    return 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+  }
+  if (normalized === 'REJECTED') {
+    return 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300';
+  }
+  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+}
+
+function displayMetaStatus(status) {
+  const normalized = String(status || '').toUpperCase();
+  if (!normalized) return 'NOT_FOUND';
+  // Meta API often reports "PENDING" while UI labels this state as "In review".
+  if (normalized === 'PENDING') return 'IN_REVIEW';
+  return normalized;
 }
 
 const META_LIMITS = {
@@ -15,9 +38,27 @@ const META_LIMITS = {
   PHONE_BUTTONS_MAX: 1,
 };
 
-export default function Communications() {
+export default function Communications({ forcedTab = null, templateMode = 'combined' }) {
   const TXN_PAGE_SIZE = 20;
   const tabs = ['WALLET', 'SEND', 'TEMPLATES', 'CONTACTS'];
+  const tabMeta = {
+    WALLET: {
+      title: 'Wallet',
+      subtitle: 'Check balance, add money, and review wallet transactions.',
+    },
+    SEND: {
+      title: 'Send Communication',
+      subtitle: 'Send approved templates to one contact or in bulk.',
+    },
+    TEMPLATES: {
+      title: 'Templates',
+      subtitle: 'Create templates, review status, and sync updates from Meta.',
+    },
+    CONTACTS: {
+      title: 'Upload Contacts',
+      subtitle: 'Upload contact CSV data for campaign and bulk communication.',
+    },
+  };
   const [wallet, setWallet] = useState(null);
   const [walletTxns, setWalletTxns] = useState([]);
   const [txnFilter, setTxnFilter] = useState('ALL');
@@ -28,8 +69,12 @@ export default function Communications() {
   const [messageCost, setMessageCost] = useState(2);
   const [contacts, setContacts] = useState([]);
   const [templates, setTemplates] = useState([]);
-  const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
+  const [tabFeedback, setTabFeedback] = useState(() =>
+    tabs.reduce((acc, tab) => {
+      acc[tab] = { error: '', info: '' };
+      return acc;
+    }, {}),
+  );
 
   const [addAmount, setAddAmount] = useState('');
   const [addingMoney, setAddingMoney] = useState(false);
@@ -38,8 +83,6 @@ export default function Communications() {
   const [templateContent, setTemplateContent] = useState('');
   const [templateCategory, setTemplateCategory] = useState('MARKETING');
   const [templateLanguage, setTemplateLanguage] = useState('en_US');
-  const [templateMetaPayload, setTemplateMetaPayload] = useState('');
-  const [useBuilder, setUseBuilder] = useState(true);
   const [includeHeader, setIncludeHeader] = useState(false);
   const [headerFormat, setHeaderFormat] = useState('TEXT');
   const [headerText, setHeaderText] = useState('');
@@ -49,6 +92,9 @@ export default function Communications() {
   const [footerText, setFooterText] = useState('');
   const [buttons, setButtons] = useState([]);
   const [templateValidationErrors, setTemplateValidationErrors] = useState([]);
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [uploadingContactsLoading, setUploadingContactsLoading] = useState(false);
+  const [syncingTemplateId, setSyncingTemplateId] = useState('');
   const [metaTemplateOptions, setMetaTemplateOptions] = useState({
     categories: ['MARKETING', 'UTILITY', 'AUTHENTICATION'],
     languages: ['en_US'],
@@ -59,7 +105,34 @@ export default function Communications() {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedBulk, setSelectedBulk] = useState({});
   const [sending, setSending] = useState(false);
-  const [activeTab, setActiveTab] = useState('WALLET');
+  const [activeTab, setActiveTab] = useState(forcedTab || 'WALLET');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (forcedTab && tabs.includes(forcedTab)) {
+      setActiveTab(forcedTab);
+    }
+  }, [forcedTab]);
+
+  const error = tabFeedback[activeTab]?.error || '';
+  const info = tabFeedback[activeTab]?.info || '';
+  const setError = (message, tab = activeTab) => {
+    setTabFeedback((prev) => ({
+      ...prev,
+      [tab]: { ...(prev[tab] || { error: '', info: '' }), error: message || '' },
+    }));
+  };
+  const setInfo = (message, tab = activeTab) => {
+    setTabFeedback((prev) => ({
+      ...prev,
+      [tab]: { ...(prev[tab] || { error: '', info: '' }), info: message || '' },
+    }));
+  };
+
+  const headerMeta = tabMeta[activeTab] || {
+    title: 'Communications',
+    subtitle: 'Upload contacts, manage templates, and send single or bulk communications.',
+  };
 
   const selectedTemplate = useMemo(
     () => asArray(templates).find((t) => t.id === selectedTemplateId),
@@ -168,11 +241,14 @@ export default function Communications() {
       api.get('/templates/meta-options').catch(() => ({ data: null })),
     ]);
     const contactsData = asArray(contactsRes.data);
-    const templatesData = asArray(templatesRes.data);
+    const templatesData = asArray(templatesRes.data?.templates || templatesRes.data);
     setWallet(walletRes.data.wallet);
     setMessageCost(Number(walletRes.data.messageCost || 2));
     setContacts(contactsData);
     setTemplates(templatesData);
+    if (templatesRes.data?.metaSyncError) {
+      setError(`Meta sync issue: ${templatesRes.data.metaSyncError}`);
+    }
     if (metaOptionsRes?.data) setMetaTemplateOptions(metaOptionsRes.data);
     setSelectedTemplateId((prev) => prev || templatesData?.[0]?.id || '');
     setSelectedContactId((prev) => prev || contactsData?.[0]?.id || '');
@@ -251,6 +327,7 @@ export default function Communications() {
     if (!csvText.trim()) return;
     setError('');
     setInfo('');
+    setUploadingContactsLoading(true);
     try {
       const { data } = await api.post('/contacts/upload', { csvText });
       setCsvText('');
@@ -258,6 +335,8 @@ export default function Communications() {
       setInfo(`Uploaded contacts: ${data.inserted}`);
     } catch (e) {
       setError(e.response?.data?.error || 'Upload failed');
+    } finally {
+      setUploadingContactsLoading(false);
     }
   }
 
@@ -266,66 +345,57 @@ export default function Communications() {
     setError('');
     setInfo('');
     setTemplateValidationErrors([]);
+    setCreatingTemplate(true);
     try {
-      let parsedMetaPayload = null;
-      if (useBuilder) {
-        if (builderValidationErrors.length) {
-          setTemplateValidationErrors(builderValidationErrors);
-          return;
-        }
-        const components = [];
-        if (includeHeader) {
-          if (headerFormat === 'TEXT') {
-            if (!headerText.trim()) {
-              setError('Header text is required for TEXT header');
-              return;
-            }
-            components.push({ type: 'HEADER', format: 'TEXT', text: headerText.trim() });
-          } else {
-            if (!headerMediaUrl.trim()) {
-              setError('Upload media for non-text header');
-              return;
-            }
-            if (!/\.[a-zA-Z0-9]{2,8}($|\?)/.test(headerMediaUrl.trim())) {
-              setError('Header media URL must be a public file URL with extension');
-              return;
-            }
-            components.push({
-              type: 'HEADER',
-              format: headerFormat,
-              example: {
-                header_handle: [headerMediaUrl.trim()],
-              },
-            });
+      if (builderValidationErrors.length) {
+        setTemplateValidationErrors(builderValidationErrors);
+        return;
+      }
+      const components = [];
+      if (includeHeader) {
+        if (headerFormat === 'TEXT') {
+          if (!headerText.trim()) {
+            setError('Header text is required for TEXT header');
+            return;
           }
-        }
-        components.push({ type: 'BODY', text: templateContent.trim() });
-        if (includeFooter && footerText.trim()) {
-          components.push({ type: 'FOOTER', text: footerText.trim() });
-        }
-        if (buttons.length) {
+          components.push({ type: 'HEADER', format: 'TEXT', text: headerText.trim() });
+        } else {
+          if (!headerMediaUrl.trim()) {
+            setError('Upload media for non-text header');
+            return;
+          }
+          if (!/\.[a-zA-Z0-9]{2,8}($|\?)/.test(headerMediaUrl.trim())) {
+            setError('Header media URL must be a public file URL with extension');
+            return;
+          }
           components.push({
-            type: 'BUTTONS',
-            buttons: buttons.map((b) => {
-              if (b.type === 'QUICK_REPLY') {
-                return { type: 'QUICK_REPLY', text: b.text };
-              }
-              if (b.type === 'URL') {
-                return { type: 'URL', text: b.text, url: b.url };
-              }
-              return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phoneNumber };
-            }),
+            type: 'HEADER',
+            format: headerFormat,
+            example: {
+              header_handle: [headerMediaUrl.trim()],
+            },
           });
         }
-        parsedMetaPayload = { components };
-      } else if (templateMetaPayload.trim()) {
-        try {
-          parsedMetaPayload = JSON.parse(templateMetaPayload);
-        } catch {
-          setError('Advanced Meta JSON payload is invalid');
-          return;
-        }
       }
+      components.push({ type: 'BODY', text: templateContent.trim() });
+      if (includeFooter && footerText.trim()) {
+        components.push({ type: 'FOOTER', text: footerText.trim() });
+      }
+      if (buttons.length) {
+        components.push({
+          type: 'BUTTONS',
+          buttons: buttons.map((b) => {
+            if (b.type === 'QUICK_REPLY') {
+              return { type: 'QUICK_REPLY', text: b.text };
+            }
+            if (b.type === 'URL') {
+              return { type: 'URL', text: b.text, url: b.url };
+            }
+            return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phoneNumber };
+          }),
+        });
+      }
+      const parsedMetaPayload = { components };
       setTemplateValidationErrors([]);
 
       await api.post('/templates', {
@@ -337,23 +407,30 @@ export default function Communications() {
       });
       setTemplateName('');
       setTemplateContent('');
-      setTemplateMetaPayload('');
       await loadAll();
       setInfo('Template created');
+      if (templateMode === 'create') {
+        navigate('/communications/templates');
+      }
     } catch (e) {
       setError(e.response?.data?.error || 'Could not create template');
+    } finally {
+      setCreatingTemplate(false);
     }
   }
 
   async function updateTemplateStatus(id) {
     setError('');
     setInfo('');
+    setSyncingTemplateId(id);
     try {
       const { data } = await api.patch(`/templates/${id}/status`);
       await loadAll();
-      setInfo(`Template status synced from Meta: ${data.metaStatus || 'UPDATED'}`);
+      setInfo(`Template status synced from Meta: ${displayMetaStatus(data.metaStatus)}`);
     } catch (e) {
       setError(e.response?.data?.error || 'Could not update template status');
+    } finally {
+      setSyncingTemplateId('');
     }
   }
 
@@ -437,42 +514,42 @@ export default function Communications() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Communications</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Upload contacts, manage templates, and send single or bulk communications.
-        </p>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{headerMeta.title}</h1>
+        <p className="text-slate-500 dark:text-slate-400 mt-1">{headerMeta.subtitle}</p>
       </div>
 
       {error && <div className="rounded-lg bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
       {info && <div className="rounded-lg bg-emerald-50 text-emerald-700 text-sm px-3 py-2">{info}</div>}
 
-      <div className="grid lg:grid-cols-[260px_1fr] gap-4 items-start">
-        <aside className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 px-2 py-2">Communications</div>
-          <nav className="space-y-1">
-            {tabs.map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setActiveTab(tab)}
-                className={[
-                  'w-full text-left rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
-                  activeTab === tab
-                    ? 'bg-brand-600 text-white'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70',
-                ].join(' ')}
-              >
-                {tab === 'WALLET'
-                  ? 'Wallet'
-                  : tab === 'SEND'
-                    ? 'Send Communication'
-                    : tab === 'TEMPLATES'
-                      ? 'Template Creation & Listing'
-                      : 'Upload Contacts'}
-              </button>
-            ))}
-          </nav>
-        </aside>
+      <div className={forcedTab ? 'space-y-4' : 'grid lg:grid-cols-[260px_1fr] gap-4 items-start'}>
+        {!forcedTab && (
+          <aside className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 px-2 py-2">Communications</div>
+            <nav className="space-y-1">
+              {tabs.map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  className={[
+                    'w-full text-left rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
+                    activeTab === tab
+                      ? 'bg-brand-600 text-white'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70',
+                  ].join(' ')}
+                >
+                  {tab === 'WALLET'
+                    ? 'Wallet'
+                    : tab === 'SEND'
+                      ? 'Send Communication'
+                      : tab === 'TEMPLATES'
+                        ? 'Template Creation & Listing'
+                        : 'Upload Contacts'}
+                </button>
+              ))}
+            </nav>
+          </aside>
+        )}
 
         <div className="space-y-4">
           {activeTab === 'WALLET' && (
@@ -613,15 +690,17 @@ export default function Communications() {
               <button
                 type="button"
                 onClick={uploadContacts}
+                disabled={uploadingContactsLoading}
                 className="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 py-2 text-sm font-semibold"
               >
-                Upload
+                {uploadingContactsLoading ? 'Uploading...' : 'Upload'}
               </button>
             </div>
           )}
 
           {activeTab === 'TEMPLATES' && (
             <>
+          {(templateMode === 'combined' || templateMode === 'create') && (
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
             <div className="font-semibold">Create template</div>
             <input
@@ -671,12 +750,7 @@ export default function Communications() {
               </div>
             </div>
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-3">
-              <label className="inline-flex items-center gap-2 text-sm font-medium">
-                <input type="checkbox" checked={useBuilder} onChange={(e) => setUseBuilder(e.target.checked)} />
-                Use guided component builder
-              </label>
-              {useBuilder && (
-                <div className="space-y-3">
+              <div className="space-y-3">
                   <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
                     <label className="inline-flex items-center gap-2 text-xs font-medium">
                       <input
@@ -822,47 +896,54 @@ export default function Communications() {
                       Buttons: {buttons.length}/{META_LIMITS.TOTAL_BUTTONS_MAX} | URL: {buttons.filter((b) => b.type === 'URL').length}/{META_LIMITS.URL_BUTTONS_MAX} | Phone: {buttons.filter((b) => b.type === 'PHONE_NUMBER').length}/{META_LIMITS.PHONE_BUTTONS_MAX}
                     </div>
                   </div>
-                </div>
-              )}
+              </div>
             </div>
-            {useBuilder && !!templateValidationErrors.length && (
+            {!!templateValidationErrors.length && (
               <div className="rounded-lg bg-red-50 text-red-700 text-xs px-3 py-2 space-y-1">
                 {templateValidationErrors.map((msg) => (
                   <div key={msg}>- {msg}</div>
                 ))}
               </div>
             )}
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Advanced Meta JSON payload (optional)</label>
-              <textarea
-                rows={8}
-                value={templateMetaPayload}
-                onChange={(e) => setTemplateMetaPayload(e.target.value)}
-                placeholder='{"components":[{"type":"HEADER","format":"TEXT","text":"Hello"},{"type":"BODY","text":"Hi {{1}}"},{"type":"FOOTER","text":"Thanks"}]}'
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-mono"
-                disabled={useBuilder}
-              />
-              <p className="text-[11px] text-slate-500 mt-1">
-                If provided, this payload is sent directly to Meta (with name/category/language auto-filled if missing).
-              </p>
-            </div>
             <button
               type="button"
               onClick={createTemplate}
+              disabled={creatingTemplate}
               className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold"
             >
-              Create template
+              {creatingTemplate ? 'Creating...' : 'Create template'}
             </button>
+            {templateMode === 'create' && (
+              <button
+                type="button"
+                onClick={() => navigate('/communications/templates')}
+                className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-semibold ml-2"
+              >
+                Back to templates
+              </button>
+            )}
           </div>
+          )}
 
+          {(templateMode === 'combined' || templateMode === 'list') && (
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
-            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm">Templates</div>
+            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm flex items-center justify-between gap-3">
+              <span>Templates</span>
+              <button
+                type="button"
+                onClick={() => navigate('/communications/templates/create')}
+                className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-xs font-semibold"
+              >
+                Create Template
+              </button>
+            </div>
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
                 <tr>
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Content</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Meta Status</th>
+                  <th className="px-4 py-3">Local Status</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
@@ -871,21 +952,32 @@ export default function Communications() {
                   <tr key={t.id}>
                     <td className="px-4 py-3">{t.name}</td>
                     <td className="px-4 py-3 text-slate-600 max-w-md truncate">{t.content}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={[
+                          'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold',
+                          metaStatusBadgeClass(t.metaStatus || 'NOT_FOUND'),
+                        ].join(' ')}
+                      >
+                        {displayMetaStatus(t.metaStatus)}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">{t.status}</td>
                     <td className="px-4 py-3">
                       <button
                         type="button"
+                        disabled={syncingTemplateId === t.id}
                         className="text-xs font-semibold text-brand-700"
                         onClick={() => updateTemplateStatus(t.id)}
                       >
-                        Sync from Meta
+                        {syncingTemplateId === t.id ? 'Syncing...' : 'Sync from Meta'}
                       </button>
                     </td>
                   </tr>
                 ))}
                 {!templates.length && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                       No templates yet.
                     </td>
                   </tr>
@@ -893,6 +985,7 @@ export default function Communications() {
               </tbody>
             </table>
           </div>
+          )}
             </>
           )}
 
