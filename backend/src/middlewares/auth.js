@@ -28,3 +28,10 @@ export function requireOwner(req, res, next) {
   }
   next();
 }
+
+export function requireChiefAdmin(req, res, next) {
+  if (req.user?.role !== 'CHIEF_ADMIN') {
+    return res.status(403).json({ error: 'Chief admin role required' });
+  }
+  next();
+}

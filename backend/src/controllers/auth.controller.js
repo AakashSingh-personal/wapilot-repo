@@ -2,6 +2,8 @@ import * as authService from '../services/auth.service.js';
 
 export async function register(req, res, next) {
   try {
+    // Public self-signup is disabled. New client onboarding is handled by the Sales team / ChiefAdmin.
+    return res.status(403).json({ error: 'Signup is disabled. Please contact sales to onboard.' });
     const { email, password, businessName } = req.body || {};
     if (!email || !password || !businessName) {
       return res.status(400).json({ error: 'email, password, and businessName are required' });

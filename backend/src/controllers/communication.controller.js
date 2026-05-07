@@ -321,6 +321,140 @@ export async function listContacts(req, res, next) {
   }
 }
 
+export async function deleteContact(req, res, next) {
+  try {
+    const { id } = req.params;
+    const contact = await prisma.contact.findFirst({
+      where: { id, businessId: req.user.businessId },
+    });
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    await prisma.contact.delete({ where: { id: contact.id } });
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function contactBook(req, res, next) {
+  try {
+    const businessId = req.user.businessId;
+    const business = await prisma.business.findUnique({
+      where: { id: businessId },
+      include: { config: true },
+    });
+
+    const parseCatalog = (value) => {
+      if (Array.isArray(value)) return { services: value, products: [] };
+      if (value && typeof value === 'object') {
+        return {
+          services: Array.isArray(value.services) ? value.services : [],
+          products: Array.isArray(value.products) ? value.products : [],
+        };
+      }
+      return { services: [], products: [] };
+    };
+
+    const catalog = parseCatalog(business?.config?.services);
+    const productNameSet = new Set(
+      (catalog.products || [])
+        .map((p) => (p && typeof p === 'object' ? p.name : p))
+        .map((n) => String(n || '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+
+    const contacts = await prisma.contact.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const phones = Array.from(
+      new Set(
+        (contacts || [])
+          .map((c) => c.phone)
+          .filter((p) => typeof p === 'string' && p.trim()),
+      ),
+    );
+
+    const customers = phones.length
+      ? await prisma.customer.findMany({
+          where: { businessId, phone: { in: phones } },
+          select: { id: true, phone: true, name: true },
+        })
+      : [];
+
+    const phoneToCustomer = new Map(customers.map((c) => [c.phone, c]));
+    const customerIds = customers.map((c) => c.id);
+
+    const [paidSums, bookingCounts, bookings] = await Promise.all([
+      customerIds.length
+        ? prisma.customerPayment.groupBy({
+            by: ['customerId'],
+            where: { businessId, customerId: { in: customerIds }, status: 'PAID' },
+            _sum: { amount: true },
+          })
+        : [],
+      customerIds.length
+        ? prisma.booking.groupBy({
+            by: ['customerId'],
+            where: { businessId, customerId: { in: customerIds } },
+            _count: { _all: true },
+          })
+        : [],
+      customerIds.length
+        ? prisma.booking.findMany({
+            where: { businessId, customerId: { in: customerIds } },
+            select: { id: true, customerId: true, service: true },
+            orderBy: { createdAt: 'desc' },
+            take: 5000,
+          })
+        : [],
+    ]);
+
+    const paidByCustomer = new Map(paidSums.map((r) => [r.customerId, Number(r._sum?.amount || 0)]));
+    const bookingCountByCustomer = new Map(bookingCounts.map((r) => [r.customerId, r._count?._all || 0]));
+    const bookingIdsByCustomer = new Map();
+    const productsByCustomer = new Map();
+    for (const b of bookings) {
+      if (!bookingIdsByCustomer.has(b.customerId)) bookingIdsByCustomer.set(b.customerId, []);
+      bookingIdsByCustomer.get(b.customerId).push(b.id);
+      const service = typeof b.service === 'string' ? b.service.trim() : '';
+      const normalized = service.toLowerCase();
+      if (service && productNameSet.has(normalized)) {
+        if (!productsByCustomer.has(b.customerId)) productsByCustomer.set(b.customerId, new Map());
+        const m = productsByCustomer.get(b.customerId);
+        m.set(service, (m.get(service) || 0) + 1);
+      }
+    }
+
+    const rows = contacts.map((c) => {
+      const customer = phoneToCustomer.get(c.phone) || null;
+      const customerId = customer?.id || null;
+      const productCounts = customerId ? productsByCustomer.get(customerId) : null;
+      const productsBought =
+        productCounts && productCounts.size
+          ? Array.from(productCounts.entries())
+              .sort((a, b) => b[1] - a[1])
+              .map(([name, count]) => ({ name, count }))
+          : [];
+      return {
+        id: c.id,
+        name: c.name || customer?.name || null,
+        phone: c.phone,
+        createdAt: c.createdAt,
+        customerId,
+        amountPaid: customerId ? paidByCustomer.get(customerId) || 0 : 0,
+        bookingCount: customerId ? bookingCountByCustomer.get(customerId) || 0 : 0,
+        bookingIds: customerId ? bookingIdsByCustomer.get(customerId) || [] : [],
+        productsBought,
+      };
+    });
+
+    res.json({ rows });
+  } catch (e) {
+    next(e);
+  }
+}
+
 export async function uploadContacts(req, res, next) {
   try {
     const { contacts = [], csvText = '' } = req.body || {};
