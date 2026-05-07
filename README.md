@@ -38,6 +38,104 @@ npm run dev
 
 Frontend defaults to `http://localhost:5173`.
 
+## Role-based guide
+
+This section is intended for different teams using WAPilot.
+
+### Product (PM / Ops)
+
+#### Core journeys
+- **ChiefAdmin onboarding**
+  - Onboard new client business from ChiefAdmin dashboard.
+  - Create additional ChiefAdmin users when needed.
+  - Access (impersonate) client account and return to ChiefAdmin without re-login.
+- **Client operations**
+  - Manage templates, contacts, wallet, and communication sends.
+  - Track contact-level outcomes in Contact Book:
+    - booking count (`Booking No`)
+    - amount paid
+    - products bought (derived from catalog mapping)
+- **User governance**
+  - User Management in Settings:
+    - create users
+    - role-scoped reset password/delete actions
+
+#### Business rules currently enforced
+- Public signup is disabled; onboarding is Sales-led.
+- ChiefAdmin sees cross-client user/client operations.
+- Client scope is isolated to own business.
+- Staff cannot reset/delete users.
+- Owner can manage only staff users in same client.
+
+#### Success metrics to track
+- onboarding completion time
+- template approval conversion (`IN_REVIEW` → `APPROVED`)
+- send success rate
+- wallet top-up frequency and communication spend
+- response quality (catalog media usage + read receipts)
+
+### Frontend (FE)
+
+#### Main areas
+- **Public pages**: `Home`, `Pricing`, `Contact`, auth screens
+- **App shell/navigation**: `Layout`
+- **Communications**: wallet/send/templates/contacts/contact-book
+- **Conversations**: media rendering + ticks + catalog send
+- **Settings**: General + embedded User Management
+- **ChiefAdmin**: client list, onboarding, impersonation
+
+#### Important UI behaviors
+- Communications tab uses **lazy-load per active tab** (no cross-tab overfetch).
+- Template status display maps Meta `PENDING` to `IN_REVIEW` for UX clarity.
+- Chat ticks use SVG markers and status colors.
+- “Back to ChiefAdmin” appears when impersonating a client.
+
+#### Frontend API surfaces used most
+- Auth: `/auth/login`, `/auth/me`
+- Communications: `/wallet`, `/contacts`, `/templates`, `/communications/send`
+- User Management: `/user-management/*`
+- ChiefAdmin: `/admin/*`
+- Media: `/media/upload`
+
+### Backend (BE)
+
+#### Architecture
+- Express controllers + Prisma data layer.
+- Role checks happen in middleware and controller-level guards.
+- WhatsApp + webhook flows update message statuses and template sync states.
+
+#### Critical ownership areas
+- **Role & permission enforcement**
+  - `CHIEF_ADMIN`, `OWNER`, `STAFF` scope constraints
+  - impersonation + return-token validation
+- **Data safety**
+  - prevent self-delete
+  - prevent cross-client mutations for owner/staff scope
+- **Performance**
+  - scoped queries for communications and user management
+  - avoid unnecessary cross-domain joins in hot paths
+- **Upload stability**
+  - JSON body limit handling for base64 media upload
+  - clear 413 responses
+
+#### Security notes
+- Never expose password hashes.
+- Reset flow issues temporary plaintext once in response; UI should treat as sensitive.
+- Return-token flow is signed JWT + type-scoped (`chief_return`) + expiry.
+
+### CTO / Engineering leadership
+
+#### Platform posture
+- Multi-tenant model by `businessId`.
+- Role-based access model with explicit policy boundaries.
+- Sales-led onboarding flow removes uncontrolled public registrations.
+- Operational observability via structured logging and explicit API boundaries.
+
+#### Risk and governance checkpoints
+- Validate migration discipline whenever role enums evolve (`prisma db push` + regenerate client + restart backend).
+- Enforce role-based controls at API level for user reset/delete and client scope.
+- Keep impersonation return flow token-scoped (`chief_return`) and time-bounded.
+
 ## Features (detailed)
 
 ### 1) Communications module (UI split into 4 pages)
@@ -365,5 +463,101 @@ See `backend/.env` for the full list used in local development. Commonly used va
 - Check role-based scope:
   - client scope shows only that client’s `OWNER` + `STAFF`
   - chief scope can view broader user list
+
+## Implemented Coverage by Requested Points
+
+### 1) Generate complete DB schema (PostgreSQL/Prisma)
+- PostgreSQL + Prisma are in use.
+- Current schema includes:
+  - `Business`, `User` (`OWNER`, `STAFF`, `CHIEF_ADMIN`)
+  - `Customer`, `Message`, `Booking`
+  - `Template`, `CommunicationCampaign`
+  - `Wallet`, `WalletTransaction`
+  - `Payment`, `CustomerPayment`, `Subscription`
+  - `BusinessConfig` (services/products/client details in JSON)
+- Tenant scoping is primarily through `businessId`.
+
+### 2) Create backend architecture
+- Implemented structure:
+  - `routes` -> `controllers` -> `services` -> Prisma client
+  - auth/role middleware (`authMiddleware`, `requireOwner`, `requireChiefAdmin`)
+  - centralized error handler
+- Integrated services include:
+  - WhatsApp API
+  - Razorpay
+  - Supabase storage
+
+### 3) Create frontend dashboard UI
+- Implemented dashboard modules:
+  - Dashboard, Customers, Chats, Bookings, Payments, Billing, Settings
+  - Communications split into Wallet, Send Communication, Templates, Upload Contacts, Contact Book
+  - User Management page + Settings subtab
+  - ChiefAdmin dashboard
+- Role-aware sidebar rendering is implemented.
+
+### 4) Build Razorpay integration
+- Implemented flow:
+  - create top-up order (`POST /wallet/add-money`)
+  - open Razorpay checkout in frontend
+  - verify signature (`PATCH /wallet/add-money/:id/verify`)
+  - credit wallet and write wallet transaction
+
+### 5) WhatsApp webhook flows
+- Implemented inbound webhook handling.
+- Implemented outbound status handling (`sent`, `delivered`, `read`) and persistence.
+- Chat UI renders delivery/read ticks from persisted statuses.
+
+### 6) AI auto-reply logic
+- Implemented AI auto-reply based on business config.
+- Uses services/products context.
+- Supports sending relevant catalog image when selected by logic.
+
+### 7) Docker/Kubernetes deployment
+- Not implemented in this repository yet.
+
+### 8) SaaS billing model
+- Implemented:
+  - wallet-based communication charging
+  - subscription and payment models in DB
+  - customer payment tracking
+
+### 9) Security hardening
+- Implemented:
+  - JWT auth
+  - role-based authorization guards
+  - client-scope restrictions (`businessId`)
+  - 413 clear response for oversized upload payloads
+  - CORS allowlist logic
+  - user-management permission matrix (staff restricted)
+
+### 10) API documentation
+- Human-readable API coverage documented in this README under “API surface (high-level)”.
+- Separate OpenAPI/Swagger file is not included currently.
+
+### 11) Test cases / QA scenarios
+- No automated test suite committed currently.
+- Manual verification flows are actively used (UI + API checks).
+
+### 12) Production deployment guide
+- Operational guidance in this README includes:
+  - env variables
+  - schema sync and client generation
+  - integration prerequisites
+- Full infra-specific production runbook is not committed yet.
+
+### 13) Investor pitch / product positioning
+- Product positioning text is included in README and landing copy sections.
+- Core pitch: WhatsApp-first CRM + automation + billing controls.
+
+### 14) Landing page content
+- Implemented public pages:
+  - Home, Pricing, Contact, policy pages
+- CTA is sales-led (`Contact sales`), self-signup removed.
+
+### 15) Multi-tenant optimization
+- Implemented:
+  - tenant scoping through `businessId`
+  - role-aware data visibility
+  - client-scope enforcement in User Management and Communications flows
 
 
