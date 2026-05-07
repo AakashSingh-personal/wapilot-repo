@@ -18,8 +18,8 @@ export default function PublicLayout() {
             <Link to="/login" className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5">
               Login
             </Link>
-            <Link to="/register" className="rounded-lg bg-brand-600 text-white px-3 py-1.5 font-semibold">
-              Get started
+            <Link to="/contact" className="rounded-lg bg-brand-600 text-white px-3 py-1.5 font-semibold">
+              Contact sales
             </Link>
           </nav>
         </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
+import UserManagement from './UserManagement.jsx';
 
 function normalizeItems(input) {
   if (!Array.isArray(input)) return [];
@@ -184,6 +185,7 @@ function CatalogEditor({ title, items, onChange, addLabel }) {
 }
 
 export default function Settings() {
+  const [activeTab, setActiveTab] = useState('GENERAL');
   const [businessName, setBusinessName] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [services, setServices] = useState([]);
@@ -271,7 +273,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-6xl">
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Settings</h1>
         <p className="text-slate-500 dark:text-slate-400 mt-1">
@@ -279,18 +281,46 @@ export default function Settings() {
         </p>
       </div>
 
-      {error && (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab('GENERAL')}
+          className={[
+            'rounded-lg px-3 py-1.5 text-sm font-semibold border',
+            activeTab === 'GENERAL'
+              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800',
+          ].join(' ')}
+        >
+          General
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('USER_MANAGEMENT')}
+          className={[
+            'rounded-lg px-3 py-1.5 text-sm font-semibold border',
+            activeTab === 'USER_MANAGEMENT'
+              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white'
+              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800',
+          ].join(' ')}
+        >
+          User Management
+        </button>
+      </div>
+
+      {activeTab === 'GENERAL' && error && (
         <div className="rounded-lg bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm px-3 py-2">
           {error}
         </div>
       )}
-      {saved && (
+      {activeTab === 'GENERAL' && saved && (
         <div className="rounded-lg bg-brand-50 dark:bg-brand-900/30 text-brand-900 dark:text-brand-100 text-sm px-3 py-2">
           {saved}
         </div>
       )}
 
-      <form onSubmit={save} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-4">
+      {activeTab === 'GENERAL' && (
+      <form onSubmit={save} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-4 max-w-2xl">
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Business name</label>
           <input
@@ -378,6 +408,9 @@ export default function Settings() {
           Save settings
         </button>
       </form>
+      )}
+
+      {activeTab === 'USER_MANAGEMENT' && <UserManagement embedded />}
     </div>
   );
 }

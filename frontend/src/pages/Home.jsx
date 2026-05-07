@@ -9,8 +9,8 @@ export default function Home() {
           WAPilot helps you manage conversations, templates, contacts, bookings, and billing in one dashboard.
         </p>
         <div className="mt-6 flex gap-3">
-          <Link to="/register" className="rounded-lg bg-white text-brand-700 px-4 py-2 font-semibold">
-            Start free
+          <Link to="/contact" className="rounded-lg bg-white text-brand-700 px-4 py-2 font-semibold">
+            Contact sales
           </Link>
           <Link to="/pricing" className="rounded-lg border border-white/60 px-4 py-2 font-semibold">
             View pricing

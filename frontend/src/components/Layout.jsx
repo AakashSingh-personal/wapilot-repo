@@ -1,27 +1,60 @@
 import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useTheme } from '../context/ThemeContext.jsx';
+import { api } from '../services/api.js';
 
-const nav = [
-  { to: '/dashboard', label: 'Dashboard', end: true, icon: '🏠' },
-  { to: '/customers', label: 'Customers', icon: '👥' },
-  { to: '/conversations', label: 'Chats', icon: '💬' },
-  { to: '/bookings', label: 'Bookings', icon: '📅' },
-  { to: '/payments', label: 'Payments', icon: '💳' },
-  { to: '/communications/wallet', label: 'Wallet', icon: '💰' },
-  { to: '/communications/send', label: 'Send Communication', icon: '📤' },
-  { to: '/communications/templates', label: 'Templates', icon: '🧩' },
-  { to: '/communications/contacts', label: 'Upload Contacts', icon: '📇' },
-  { to: '/billing', label: 'Billing', icon: '🧾' },
-  { to: '/settings', label: 'Settings', icon: '⚙️' },
-];
+function buildNav(role) {
+  if (role === 'CHIEF_ADMIN') {
+    return [
+      { to: '/chiefadmin', label: 'ChiefAdmin', end: true, icon: '🛡️' },
+      { to: '/user-management', label: 'User Management', icon: '👤' },
+    ];
+  }
+  const items = [
+    { to: '/dashboard', label: 'Dashboard', end: true, icon: '🏠' },
+    { to: '/customers', label: 'Customers', icon: '👥' },
+    { to: '/conversations', label: 'Chats', icon: '💬' },
+    { to: '/bookings', label: 'Bookings', icon: '📅' },
+    { to: '/payments', label: 'Payments', icon: '💳' },
+    { to: '/communications/wallet', label: 'Wallet', icon: '💰' },
+    { to: '/communications/send', label: 'Send Communication', icon: '📤' },
+    { to: '/communications/templates', label: 'Templates', icon: '🧩' },
+    { to: '/communications/contacts', label: 'Upload Contacts', icon: '📇' },
+    { to: '/communications/contact-book', label: 'Contact Book', icon: '📒' },
+    { to: '/billing', label: 'Billing', icon: '🧾' },
+    { to: '/user-management', label: 'User Management', icon: '👤' },
+    { to: '/settings', label: 'Settings', icon: '⚙️' },
+  ];
+  return items;
+}
 
 export default function Layout() {
-  const { logout, business, user } = useAuth();
+  const { logout, business, user, loginState } = useAuth();
   const { theme, toggle } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [returningToChief, setReturningToChief] = useState(false);
+  const navigate = useNavigate();
+  const nav = buildNav(user?.role);
+  const hasReturnToken =
+    user?.role !== 'CHIEF_ADMIN' && Boolean(sessionStorage.getItem('wapilot_chiefadmin_return_token'));
+
+  async function backToChiefAdmin() {
+    const returnToken = sessionStorage.getItem('wapilot_chiefadmin_return_token');
+    if (!returnToken || returningToChief) return;
+    setReturningToChief(true);
+    try {
+      const { data } = await api.post('/admin/return-session', { returnToken });
+      sessionStorage.removeItem('wapilot_chiefadmin_return_token');
+      loginState(data);
+      navigate('/chiefadmin');
+    } catch {
+      sessionStorage.removeItem('wapilot_chiefadmin_return_token');
+    } finally {
+      setReturningToChief(false);
+    }
+  }
 
   const navLinkClass = ({ isActive }) =>
     [
@@ -77,6 +110,16 @@ export default function Layout() {
           {renderNav(false)}
         </nav>
         <div className="p-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+          {hasReturnToken && (
+            <button
+              type="button"
+              onClick={backToChiefAdmin}
+              disabled={returningToChief}
+              className="w-full rounded-lg border border-brand-200 dark:border-brand-700 px-3 py-2 text-sm font-semibold text-brand-700 dark:text-brand-300 disabled:opacity-60"
+            >
+              {returningToChief ? 'Switching...' : 'Back to ChiefAdmin'}
+            </button>
+          )}
           <button
             type="button"
             onClick={toggle}
@@ -119,6 +162,17 @@ export default function Layout() {
         </div>
         <nav className="flex-1 p-3 space-y-1">{renderNav(sidebarCollapsed)}</nav>
         <div className="p-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+          {hasReturnToken && (
+            <button
+              type="button"
+              onClick={backToChiefAdmin}
+              disabled={returningToChief}
+              className="w-full rounded-lg border border-brand-200 dark:border-brand-700 px-3 py-2 text-sm font-semibold text-brand-700 dark:text-brand-300 disabled:opacity-60"
+              title="Return to ChiefAdmin"
+            >
+              {sidebarCollapsed ? (returningToChief ? '...' : 'Chief') : returningToChief ? 'Switching...' : 'Back to ChiefAdmin'}
+            </button>
+          )}
           <button
             type="button"
             onClick={toggle}

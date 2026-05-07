@@ -28,8 +28,8 @@ export default function Pricing() {
         </p>
       </div>
 
-      <Link to="/register" className="inline-block rounded-lg bg-brand-600 text-white px-4 py-2 font-semibold">
-        Create account
+      <Link to="/contact" className="inline-block rounded-lg bg-brand-600 text-white px-4 py-2 font-semibold">
+        Contact sales
       </Link>
     </div>
   );

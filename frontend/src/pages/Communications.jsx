@@ -40,7 +40,7 @@ const META_LIMITS = {
 
 export default function Communications({ forcedTab = null, templateMode = 'combined' }) {
   const TXN_PAGE_SIZE = 20;
-  const tabs = ['WALLET', 'SEND', 'TEMPLATES', 'CONTACTS'];
+  const tabs = ['WALLET', 'SEND', 'TEMPLATES', 'CONTACTS', 'CONTACT_BOOK'];
   const tabMeta = {
     WALLET: {
       title: 'Wallet',
@@ -58,6 +58,10 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       title: 'Upload Contacts',
       subtitle: 'Upload contact CSV data for campaign and bulk communication.',
     },
+    CONTACT_BOOK: {
+      title: 'Contact Book',
+      subtitle: 'View uploaded contacts with payments and booking history.',
+    },
   };
   const [wallet, setWallet] = useState(null);
   const [walletTxns, setWalletTxns] = useState([]);
@@ -68,6 +72,8 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   const [txnLoading, setTxnLoading] = useState(false);
   const [messageCost, setMessageCost] = useState(2);
   const [contacts, setContacts] = useState([]);
+  const [contactBookRows, setContactBookRows] = useState([]);
+  const [contactBookLoading, setContactBookLoading] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [tabFeedback, setTabFeedback] = useState(() =>
     tabs.reduce((acc, tab) => {
@@ -233,41 +239,99 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     }
   }
 
-  async function loadAll() {
-    const [walletRes, contactsRes, templatesRes, metaOptionsRes] = await Promise.all([
-      api.get('/wallet'),
-      api.get('/contacts'),
-      api.get('/templates'),
-      api.get('/templates/meta-options').catch(() => ({ data: null })),
-    ]);
-    const contactsData = asArray(contactsRes.data);
-    const templatesData = asArray(templatesRes.data?.templates || templatesRes.data);
-    setWallet(walletRes.data.wallet);
-    setMessageCost(Number(walletRes.data.messageCost || 2));
+  async function ensureWalletLoaded() {
+    if (wallet) return;
+    const { data } = await api.get('/wallet');
+    setWallet(data.wallet);
+    setMessageCost(Number(data.messageCost || 2));
+  }
+
+  async function ensureContactsLoaded() {
+    if (contacts.length) return;
+    const { data } = await api.get('/contacts');
+    const contactsData = asArray(data);
     setContacts(contactsData);
-    setTemplates(templatesData);
-    if (templatesRes.data?.metaSyncError) {
-      setError(`Meta sync issue: ${templatesRes.data.metaSyncError}`);
-    }
-    if (metaOptionsRes?.data) setMetaTemplateOptions(metaOptionsRes.data);
-    setSelectedTemplateId((prev) => prev || templatesData?.[0]?.id || '');
     setSelectedContactId((prev) => prev || contactsData?.[0]?.id || '');
-    await loadWalletTransactions({ filter: txnFilter, offset: 0, append: false });
+  }
+
+  async function ensureTemplatesLoaded() {
+    if (templates.length) return;
+    const { data } = await api.get('/templates');
+    const templatesData = asArray(data?.templates || data);
+    setTemplates(templatesData);
+    if (data?.metaSyncError) {
+      setError(`Meta sync issue: ${data.metaSyncError}`, 'TEMPLATES');
+    }
+    setSelectedTemplateId((prev) => prev || templatesData?.[0]?.id || '');
+  }
+
+  async function ensureMetaTemplateOptionsLoaded() {
+    if (metaTemplateOptions?.categories?.length > 1 || metaTemplateOptions?.languages?.length > 1) return;
+    const { data } = await api.get('/templates/meta-options').catch(() => ({ data: null }));
+    if (data) setMetaTemplateOptions(data);
+  }
+
+  async function loadContactBook() {
+    setContactBookLoading(true);
+    try {
+      const { data } = await api.get('/contacts/book');
+      setContactBookRows(asArray(data?.rows));
+    } catch (e) {
+      setError(e.response?.data?.error || 'Failed to load contact book', 'CONTACT_BOOK');
+    } finally {
+      setContactBookLoading(false);
+    }
+  }
+
+  async function deleteContact(id) {
+    if (!id) return;
+    const ok = window.confirm('Delete this contact?');
+    if (!ok) return;
+    setError('', 'CONTACT_BOOK');
+    setInfo('', 'CONTACT_BOOK');
+    try {
+      await api.delete(`/contacts/${id}`);
+      setInfo('Contact deleted', 'CONTACT_BOOK');
+      setContactBookRows((prev) => prev.filter((r) => r.id !== id));
+      await loadContactBook();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Failed to delete contact', 'CONTACT_BOOK');
+    }
   }
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        await loadAll();
+        // Load only what each tab needs (avoid cross-tab API spam).
+        if (activeTab === 'WALLET') {
+          await ensureWalletLoaded();
+          await loadWalletTransactions({ filter: txnFilter, offset: 0, append: false });
+        } else if (activeTab === 'SEND') {
+          await Promise.all([ensureWalletLoaded(), ensureContactsLoaded(), ensureTemplatesLoaded()]);
+        } else if (activeTab === 'TEMPLATES') {
+          await Promise.all([ensureTemplatesLoaded(), ensureMetaTemplateOptionsLoaded()]);
+        } else if (activeTab === 'CONTACT_BOOK') {
+          await loadContactBook();
+        } else if (activeTab === 'CONTACTS') {
+          // Upload page doesn't need list calls on every visit.
+        }
       } catch (e) {
-        if (!cancelled) setError(e.response?.data?.error || 'Failed to load communication data');
+        if (!cancelled) setError(e.response?.data?.error || 'Failed to load communication data', activeTab);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'WALLET') return;
+    // When in wallet tab, refetch transactions if filters change.
+    loadWalletTransactions({ filter: txnFilter, offset: 0, append: false, onlyTopups: txnOnlyTopups });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, txnFilter, txnOnlyTopups]);
 
   async function addMoney() {
     if (!addAmount) return;
@@ -695,6 +759,91 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
               >
                 {uploadingContactsLoading ? 'Uploading...' : 'Upload'}
               </button>
+            </div>
+          )}
+
+          {activeTab === 'CONTACT_BOOK' && (
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+              <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm flex items-center justify-between gap-3">
+                <span>Contact Book</span>
+                <button
+                  type="button"
+                  onClick={loadContactBook}
+                  disabled={contactBookLoading}
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                >
+                  {contactBookLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
+                  <tr>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">Phone</th>
+                    <th className="px-4 py-3">Amount paid</th>
+                    <th className="px-4 py-3">Booking No</th>
+                    <th className="px-4 py-3">Products bought</th>
+                    <th className="px-4 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {contactBookRows.map((r) => (
+                    <tr key={r.id}>
+                      <td className="px-4 py-3">{r.name || '-'}</td>
+                      <td className="px-4 py-3 font-mono text-xs">{r.phone}</td>
+                      <td className="px-4 py-3">₹{Number(r.amountPaid || 0).toFixed(2)}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold">{r.bookingCount || 0}</div>
+                        {Array.isArray(r.bookingIds) && r.bookingIds.length ? (
+                          <div className="text-[11px] text-slate-500 truncate max-w-[320px]">
+                            {r.bookingIds.slice(0, 5).join(', ')}
+                            {r.bookingIds.length > 5 ? ` +${r.bookingIds.length - 5} more` : ''}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        {Array.isArray(r.productsBought) && r.productsBought.length ? (
+                          <div className="space-y-1 max-w-[360px]">
+                            <div className="text-xs font-semibold">{r.productsBought.length} item(s)</div>
+                            <div className="text-[11px] text-slate-500 truncate">
+                              {r.productsBought
+                                .slice(0, 4)
+                                .map((p) => `${p.name}${p.count > 1 ? ` (${p.count})` : ''}`)
+                                .join(', ')}
+                              {r.productsBought.length > 4 ? ` +${r.productsBought.length - 4} more` : ''}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => deleteContact(r.id)}
+                          className="text-xs font-semibold text-rose-700"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!contactBookRows.length && !contactBookLoading && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        No contacts found.
+                      </td>
+                    </tr>
+                  )}
+                  {contactBookLoading && !contactBookRows.length && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        Loading contact book...
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           )}
 

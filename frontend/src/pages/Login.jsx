@@ -65,9 +65,9 @@ export default function Login() {
           </button>
         </form>
         <p className="text-center text-sm text-slate-500 mt-6">
-          New business?{' '}
-          <Link className="text-brand-600 font-semibold" to="/register">
-            Create account
+          Need access?{' '}
+          <Link className="text-brand-600 font-semibold" to="/contact">
+            Contact sales
           </Link>
         </p>
       </div>
