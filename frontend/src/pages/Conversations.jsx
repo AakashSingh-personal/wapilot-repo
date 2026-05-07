@@ -74,11 +74,29 @@ function bubbleMeta(type) {
 
 function statusTick(status) {
   const s = String(status || '').toLowerCase();
-  if (s === 'read') return { text: '✓✓', cls: 'text-sky-500' };
-  if (s === 'delivered') return { text: '✓✓', cls: 'text-slate-400' };
-  if (s === 'sent') return { text: '✓', cls: 'text-slate-400' };
-  if (s === 'pending') return { text: '⏳', cls: 'text-slate-400' };
+  if (s === 'read') return { type: 'double', cls: 'text-sky-200 dark:text-sky-300' };
+  if (s === 'delivered') return { type: 'double', cls: 'text-white/80' };
+  if (s === 'sent') return { type: 'single', cls: 'text-white/80' };
+  if (s === 'pending') return { type: 'pending', cls: 'text-white/75' };
   return null;
+}
+
+function StatusMarker({ marker }) {
+  if (!marker) return null;
+  if (marker.type === 'pending') {
+    return <span className={`${marker.cls} text-[12px] font-bold leading-none -mb-px`}>⌛</span>;
+  }
+
+  if (marker.type === 'single') {
+    return <span className={`${marker.cls} text-[13px] font-black leading-none tracking-[-0.02em] -mb-px`}>✓</span>;
+  }
+
+  return (
+    <span className={`inline-flex items-center ${marker.cls} text-[13px] font-black leading-none -mb-px`} aria-label="delivered">
+      <span className="tracking-[-0.07em]">✓</span>
+      <span className="-ml-[3px] tracking-[-0.07em]">✓</span>
+    </span>
+  );
 }
 
 export default function Conversations() {
@@ -267,13 +285,12 @@ export default function Conversations() {
     try {
       await api.post('/send-message', { customerId: selectedId, content: draft.trim() });
       setDraft('');
-      await loadMessages(selectedId);
-      await loadThreads();
+      setLoadingSend(false);
+      await Promise.allSettled([loadMessages(selectedId), loadThreads()]);
     } catch (e) {
       setError(e.response?.data?.error || 'Send failed — check WhatsApp token / phone number id');
-    } finally {
-      setLoadingSend(false);
     }
+    setLoadingSend(false);
   }
 
   async function sendFromCatalog(item) {
@@ -287,13 +304,12 @@ export default function Conversations() {
         content: item.name,
       });
       setShowCatalog(false);
-      await loadMessages(selectedId);
-      await loadThreads();
+      setLoadingSend(false);
+      await Promise.allSettled([loadMessages(selectedId), loadThreads()]);
     } catch (e) {
       setError(e.response?.data?.error || 'Catalog send failed');
-    } finally {
-      setLoadingSend(false);
     }
+    setLoadingSend(false);
   }
 
   return (
@@ -558,8 +574,8 @@ export default function Conversations() {
                     })()}
                     <div
                       className={[
-                        'text-[10px] mt-1 opacity-70 flex items-center gap-1',
-                        incoming ? 'text-slate-400' : 'text-white/70',
+                        'text-[10px] mt-1 opacity-80 flex items-center gap-1.5',
+                        incoming ? 'text-slate-400' : 'text-white/80',
                       ].join(' ')}
                     >
                       <span>{new Date(m.createdAt).toLocaleString()}</span>
@@ -568,7 +584,7 @@ export default function Conversations() {
                         const parsed = parseMessageContent(m.content);
                         const marker = statusTick(parsed.status);
                         if (!marker) return null;
-                        return <span className={marker.cls}>{marker.text}</span>;
+                        return <StatusMarker marker={marker} />;
                       })()}
                     </div>
                   </div>
