@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api.js';
+import { subscribeRealtime } from '../realtime/socket.js';
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -350,6 +351,16 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       setError(e.response?.data?.error || 'Failed to delete contact', 'CONTACT_BOOK');
     }
   }
+
+  useEffect(() => {
+    return subscribeRealtime((evt) => {
+      if (evt?.type === 'contacts_changed' && activeTab === 'CONTACT_BOOK') {
+        void loadContactBook();
+      }
+    });
+    // loadContactBook is stable within this page lifecycle
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   useEffect(() => {
     let cancelled = false;

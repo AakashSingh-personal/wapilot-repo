@@ -1,5 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import { log } from '../utils/logger.js';
+import { publish } from '../realtime/publisher.js';
+import { EventType } from '../realtime/events.js';
 import { detectIntent } from './intent.service.js';
 import { generateAIReply } from './openai.service.js';
 import {
@@ -219,12 +221,22 @@ async function syncInboundCustomerToContactBook({ businessId, customer, profileN
     await prisma.contact.create({
       data: { businessId, phone, name },
     });
+    await publish({
+      businessId,
+      type: EventType.CONTACTS_CHANGED,
+      reason: 'contact_created',
+    });
     return;
   }
   if (name && existing.name !== name) {
     await prisma.contact.update({
       where: { id: existing.id },
       data: { name },
+    });
+    await publish({
+      businessId,
+      type: EventType.CONTACTS_CHANGED,
+      reason: 'contact_updated',
     });
   }
 }
@@ -333,6 +345,13 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
     }
 
     if (confirmed) {
+      await publish({
+        businessId: business.id,
+        customerId: customer.id,
+        conversationId: customer.id,
+        type: EventType.CONVERSATION_UPDATED,
+        reason: 'booking_confirmed',
+      });
       replyText = `Booking confirmed for ${pickedSlot.slot}! 🎉 See you soon.`;
     } else {
       replyText = `Sorry, booking confirm nahi ho payi.\n${formatSlotsMessage(slots)}`;
@@ -342,11 +361,25 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
       where: { id: customer.id },
       data: { bookingSlotSelectionPending: true },
     });
+    await publish({
+      businessId: business.id,
+      customerId: customer.id,
+      conversationId: customer.id,
+      type: EventType.CONVERSATION_UPDATED,
+      reason: 'booking_intent',
+    });
     replyText = formatSlotsMessage(slots);
   } else if (customer.bookingSlotSelectionPending && isCancelBookingMessage(textBody)) {
     await prisma.customer.update({
       where: { id: customer.id },
       data: { bookingSlotSelectionPending: false },
+    });
+    await publish({
+      businessId: business.id,
+      customerId: customer.id,
+      conversationId: customer.id,
+      type: EventType.CONVERSATION_UPDATED,
+      reason: 'booking_cancelled',
     });
     replyText = 'No problem, booking request cancelled. Jab chaho message kar do.';
   } else if (customer.bookingSlotSelectionPending) {
@@ -510,6 +543,14 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
     log('error', 'webhook_reply_send_failed', { message: e.message });
   }
 
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.MESSAGE_CREATED,
+    reason: 'ai_auto_reply',
+  });
+
   return { ok: true };
 }
 
@@ -535,6 +576,27 @@ export async function handleInboundText({
     },
   });
   await bumpInboundCustomerActivity(customer.id);
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.MESSAGE_CREATED,
+    reason: 'user_inbound_text',
+  });
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.UNREAD_CHANGED,
+    reason: 'increment',
+  });
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.SESSION_CHANGED,
+    reason: 'last_inbound',
+  });
 
   const cfg = business.config;
   if (!cfg?.autoReplyEnabled) {
@@ -589,6 +651,16 @@ export async function handleWhatsAppStatuses({ phoneNumberId, statuses = [] }) {
       },
     });
     updated += 1;
+    if (business?.id && existing.customerId) {
+      await publish({
+        businessId: business.id,
+        customerId: existing.customerId,
+        conversationId: existing.customerId,
+        type: EventType.MESSAGE_STATUS,
+        reason: 'whatsapp_status',
+        waStatus: nextStatus,
+      });
+    }
   }
   return { ok: true, updated };
 }
@@ -624,6 +696,27 @@ export async function handleInboundImage({
     },
   });
   await bumpInboundCustomerActivity(customer.id);
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.MESSAGE_CREATED,
+    reason: 'user_inbound_image',
+  });
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.UNREAD_CHANGED,
+    reason: 'increment',
+  });
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.SESSION_CHANGED,
+    reason: 'last_inbound',
+  });
 
   return { ok: true };
 }
@@ -703,6 +796,27 @@ export async function handleInboundNonText({
     },
   });
   await bumpInboundCustomerActivity(customer.id);
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.MESSAGE_CREATED,
+    reason: 'user_inbound_media',
+  });
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.UNREAD_CHANGED,
+    reason: 'increment',
+  });
+  await publish({
+    businessId: business.id,
+    customerId: customer.id,
+    conversationId: customer.id,
+    type: EventType.SESSION_CHANGED,
+    reason: 'last_inbound',
+  });
 
   return { ok: true };
 }

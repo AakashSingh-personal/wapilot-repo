@@ -1,4 +1,6 @@
 import { prisma } from '../lib/prisma.js';
+import { publish } from '../realtime/publisher.js';
+import { EventType } from '../realtime/events.js';
 import { fetchWhatsAppMediaById } from '../services/whatsapp.service.js';
 import { computeSessionStatus, computeMessageStatus } from '../utils/conversationStatus.js';
 import { resumeAiFromLastCustomerMessage } from '../services/webhook.service.js';
@@ -223,6 +225,14 @@ export async function messagesForCustomer(req, res, next) {
       data: { inboxUnreadCount: 0 },
     });
 
+    await publish({
+      businessId: req.user.businessId,
+      customerId,
+      conversationId: customerId,
+      type: EventType.UNREAD_CHANGED,
+      reason: 'cleared',
+    });
+
     const [messages, customerRow] = await Promise.all([
       prisma.message.findMany({
         where: {
@@ -270,6 +280,13 @@ export async function patchConversationAiControl(req, res, next) {
         where: { id: customerId, businessId },
         select: aiControlInclude,
       });
+      await publish({
+        businessId,
+        customerId,
+        conversationId: customerId,
+        type: EventType.AI_CONTROL_CHANGED,
+        reason: 'override',
+      });
       return res.json({
         ok: true,
         aiControl: mapCustomerAiControl(aiRow),
@@ -301,6 +318,14 @@ export async function patchConversationAiControl(req, res, next) {
       const aiRow = await prisma.customer.findFirst({
         where: { id: customerId, businessId },
         select: aiControlInclude,
+      });
+
+      await publish({
+        businessId,
+        customerId,
+        conversationId: customerId,
+        type: EventType.AI_CONTROL_CHANGED,
+        reason: 'resume',
       });
 
       const skipped = Boolean(resumeResult?.skipped || resumeResult?.reason);

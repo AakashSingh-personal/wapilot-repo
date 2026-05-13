@@ -1,0 +1,64 @@
+const THREAD_DEBOUNCE_MS = 280;
+
+/**
+ * @param {{
+ *   loadThreads: () => void | Promise<void>,
+ *   loadMessages: (customerId: string) => void | Promise<void>,
+ *   getSelectedCustomerId: () => string | null,
+ *   onAgentTyping?: (evt: Record<string, unknown>) => void,
+ *   onAgentViewing?: (evt: Record<string, unknown>) => void,
+ * }} ctx
+ */
+export function createInboxEventHandler(ctx) {
+  let threadTimer = null;
+
+  const scheduleThreads = () => {
+    clearTimeout(threadTimer);
+    threadTimer = setTimeout(() => {
+      threadTimer = null;
+      void ctx.loadThreads?.();
+    }, THREAD_DEBOUNCE_MS);
+  };
+
+  const refreshOpenChatIfRelevant = (evt) => {
+    const selected = ctx.getSelectedCustomerId?.() ?? null;
+    const cid = (evt.customerId || evt.conversationId || null)?.toString?.() ?? null;
+    if (!selected) return;
+    if (!cid || cid === selected) {
+      void ctx.loadMessages?.(selected);
+    }
+  };
+
+  return (evt) => {
+    if (!evt || typeof evt.type !== 'string') return;
+
+    if (evt.type === 'auth_ok' || evt.type === 'auth_error') return;
+
+    if (evt.type === 'agent_typing') {
+      ctx.onAgentTyping?.(evt);
+      return;
+    }
+    if (evt.type === 'agent_viewing') {
+      ctx.onAgentViewing?.(evt);
+      return;
+    }
+
+    scheduleThreads();
+    refreshOpenChatIfRelevant(evt);
+  };
+}
+
+/**
+ * @param {{
+ *   activeTab: string,
+ *   loadContactBook: () => void | Promise<void>,
+ * }} ctx
+ */
+export function createContactsEventHandler(ctx) {
+  return (evt) => {
+    if (!evt || evt.type !== 'contacts_changed') return;
+    if (ctx.activeTab === 'CONTACT_BOOK') {
+      void ctx.loadContactBook?.();
+    }
+  };
+}

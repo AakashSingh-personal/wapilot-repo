@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api, setAuthToken } from '../services/api.js';
+import { startRealtime, stopRealtime } from '../realtime/socket.js';
 
 const AuthContext = createContext(null);
 
@@ -48,6 +49,20 @@ export function AuthProvider({ children }) {
       cancelled = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    const authed = Boolean(token && user);
+    if (!authed || !token) {
+      stopRealtime();
+      return;
+    }
+    startRealtime({
+      getToken: () => token,
+    });
+    return () => {
+      stopRealtime();
+    };
+  }, [token, user]);
 
   const loginState = useCallback(({ token: t, user: u, business: b }) => {
     setAuthToken(t);

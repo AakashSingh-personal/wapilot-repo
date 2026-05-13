@@ -1,5 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import { log } from '../utils/logger.js';
+import { publish } from '../realtime/publisher.js';
+import { EventType } from '../realtime/events.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
 import { structuredContent } from '../utils/waStructuredMessage.js';
 import { createWhatsAppTemplate, listWhatsAppTemplates } from '../services/whatsapp.service.js';
@@ -913,6 +915,20 @@ export async function sendTemplateCommunication(req, res, next) {
               customerId: customerRecord.id,
             });
           }
+          await publish({
+            businessId: req.user.businessId,
+            customerId: customerRecord.id,
+            conversationId: customerRecord.id,
+            type: EventType.MESSAGE_CREATED,
+            reason: 'template_campaign',
+          });
+          await publish({
+            businessId: req.user.businessId,
+            customerId: customerRecord.id,
+            conversationId: customerRecord.id,
+            type: EventType.AI_CONTROL_CHANGED,
+            reason: 'template_send_pause',
+          });
         } catch (bookErr) {
           log('error', 'communications_post_send_bookkeeping_failed', {
             message: bookErr.message,

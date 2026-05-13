@@ -23,7 +23,8 @@
     "jsonwebtoken": "^9.0.2",
     "openai": "^4.96.0",
     "qrcode": "^1.5.4",
-    "razorpay": "^2.9.6"
+    "razorpay": "^2.9.6",
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "prisma": "^6.8.2"

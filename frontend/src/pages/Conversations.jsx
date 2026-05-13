@@ -3,8 +3,17 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../services/api.js';
 import { parseMessageContent, previewText } from '../utils/whatsappMessagePreview.js';
 import { SessionBadge, MessageBadge } from '../components/ChatStatusBadges.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
+import {
+  subscribeRealtime,
+  subscribeConnectionState,
+  onReconnect,
+  sendAgentTyping,
+  sendAgentViewing,
+} from '../realtime/socket.js';
+import { createInboxEventHandler } from '../realtime/eventHandlers.js';
 
-const POLL_MS = 4000;
+const FALLBACK_POLL_MS = 60_000;
 
 function formatShortTime(iso) {
   if (!iso) return '';
@@ -95,6 +104,7 @@ function StatusMarker({ marker }) {
 }
 
 export default function Conversations() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const paramCustomerId = searchParams.get('customer');
 
@@ -125,10 +135,21 @@ export default function Conversations() {
   const [showResumeAiModal, setShowResumeAiModal] = useState(false);
   const [resumeAiMode, setResumeAiMode] = useState('NEW_MESSAGES_ONLY');
   const [loadingAiControl, setLoadingAiControl] = useState(false);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [presenceTypingName, setPresenceTypingName] = useState('');
+  const [presenceViewingName, setPresenceViewingName] = useState('');
 
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const mediaUrlRefs = useRef({});
+  const selectedIdRef = useRef(null);
+  const typingIdleTimerRef = useRef(null);
+  const presenceTypingClearRef = useRef(null);
+  const presenceViewingClearRef = useRef(null);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   const selected = useMemo(
     () => threads.find((t) => t.id === selectedId) || null,
@@ -178,6 +199,111 @@ export default function Conversations() {
       setError(e.response?.data?.error || 'Failed to load messages');
     }
   }, []);
+
+  useEffect(() => {
+    setPresenceTypingName('');
+    setPresenceViewingName('');
+  }, [selectedId]);
+
+  useEffect(() => {
+    let fallbackTimer = null;
+    const clearFallback = () => {
+      if (fallbackTimer) {
+        clearInterval(fallbackTimer);
+        fallbackTimer = null;
+      }
+    };
+    const startFallback = () => {
+      clearFallback();
+      fallbackTimer = setInterval(() => {
+        if (document.hidden) return;
+        void loadThreads();
+        const sid = selectedIdRef.current;
+        if (sid) void loadMessages(sid);
+      }, FALLBACK_POLL_MS);
+    };
+
+    const unsubConn = subscribeConnectionState((connected) => {
+      setRealtimeConnected(connected);
+      if (connected) clearFallback();
+      else startFallback();
+    });
+
+    const handler = createInboxEventHandler({
+      loadThreads,
+      loadMessages,
+      getSelectedCustomerId: () => selectedIdRef.current,
+      onAgentTyping: (evt) => {
+        const uid = String(evt.userId || '');
+        if (user?.id && uid === user.id) return;
+        const cid = String(evt.customerId || '');
+        if (cid !== selectedIdRef.current) return;
+        if (evt.typing) {
+          if (presenceTypingClearRef.current) clearTimeout(presenceTypingClearRef.current);
+          setPresenceTypingName(String(evt.agentName || 'Teammate'));
+          presenceTypingClearRef.current = setTimeout(() => setPresenceTypingName(''), 4500);
+        } else {
+          setPresenceTypingName('');
+          if (presenceTypingClearRef.current) clearTimeout(presenceTypingClearRef.current);
+        }
+      },
+      onAgentViewing: (evt) => {
+        const uid = String(evt.userId || '');
+        if (user?.id && uid === user.id) return;
+        const cid = String(evt.customerId || '');
+        if (cid !== selectedIdRef.current) return;
+        if (evt.viewing) {
+          if (presenceViewingClearRef.current) clearTimeout(presenceViewingClearRef.current);
+          setPresenceViewingName(String(evt.agentName || 'Teammate'));
+          presenceViewingClearRef.current = setTimeout(() => setPresenceViewingName(''), 8000);
+        } else {
+          setPresenceViewingName('');
+          if (presenceViewingClearRef.current) clearTimeout(presenceViewingClearRef.current);
+        }
+      },
+    });
+    const unsubRt = subscribeRealtime(handler);
+    const unsubRc = onReconnect(() => {
+      void loadThreads();
+      const sid = selectedIdRef.current;
+      if (sid) void loadMessages(sid);
+    });
+
+    return () => {
+      unsubConn();
+      unsubRt();
+      unsubRc();
+      clearFallback();
+    };
+  }, [loadThreads, loadMessages, user?.id, user?.email]);
+
+  useEffect(() => {
+    if (!selectedId || !user?.email) return undefined;
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    typingIdleTimerRef.current = setTimeout(() => {
+      sendAgentTyping({
+        customerId: selectedId,
+        typing: draft.trim().length > 0,
+        agentName: user.email,
+      });
+    }, 400);
+    return () => {
+      if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+      sendAgentTyping({ customerId: selectedId, typing: false, agentName: user.email });
+    };
+  }, [draft, selectedId, user?.email]);
+
+  useEffect(() => {
+    if (!user?.email) return undefined;
+    if (selectedId) {
+      sendAgentViewing({ customerId: selectedId, viewing: true, agentName: user.email });
+    }
+    return () => {
+      if (selectedId) {
+        sendAgentViewing({ customerId: selectedId, viewing: false, agentName: user.email });
+      }
+    };
+  }, [selectedId, user?.email]);
 
   useEffect(() => {
     let cancelled = false;
@@ -266,15 +392,6 @@ export default function Conversations() {
     if (!messagesContainerRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, selectedId]);
-
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (document.hidden) return;
-      loadThreads();
-      if (selectedId) loadMessages(selectedId);
-    }, POLL_MS);
-    return () => clearInterval(t);
-  }, [loadThreads, loadMessages, selectedId]);
 
   useEffect(() => {
     const mediaIds = messages
@@ -628,10 +745,20 @@ export default function Conversations() {
                   24-hour session expired. Send template message to reopen chat.
                 </div>
               ) : null}
+              {presenceTypingName ? (
+                <div className="text-xs font-medium text-indigo-700 dark:text-indigo-300 pt-1">
+                  {presenceTypingName} is typing…
+                </div>
+              ) : null}
+              {presenceViewingName ? (
+                <div className="text-xs text-slate-600 dark:text-slate-400 pt-0.5">
+                  {presenceViewingName} is viewing this chat
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-col items-end gap-1 shrink-0">
               <span className="text-[10px] uppercase tracking-wide text-slate-400 hidden sm:block">
-                Live sync ~{POLL_MS / 1000}s
+                {realtimeConnected ? 'Live · WebSocket' : `Fallback sync ~${FALLBACK_POLL_MS / 1000}s`}
               </span>
             </div>
           </div>
