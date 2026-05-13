@@ -4,6 +4,40 @@ import { log } from '../utils/logger.js';
 
 const CHANNEL = process.env.REDIS_REALTIME_CHANNEL || 'wapilot:realtime';
 
+/**
+ * Many env panels paste `redis-cli -u redis://...` or wrap the URI in spaces / quotes.
+ * ioredis expects a bare `redis://` or `rediss://` connection string.
+ */
+export function normalizeRedisUrl(input) {
+  if (input == null) return '';
+  let s = String(input).trim();
+  if (!s) return '';
+  s = s.replace(/^["']+|["']+$/g, '');
+  try {
+    s = decodeURIComponent(s.trim());
+  } catch {
+    /* keep s */
+  }
+  s = s.trim();
+  s = s.replace(/^(redis-cli\s+)+/i, '');
+  s = s.replace(/^-u\s+/i, '');
+  s = s.replace(/^["']+|["']+$/g, '');
+  s = s.trim();
+  const m = s.match(/(rediss?:\/\/[^\s]+)/i);
+  if (m) return m[1].trim();
+  return s;
+}
+
+function redisHostHint(url) {
+  try {
+    const u = new URL(url);
+    const port = u.port ? `:${u.port}` : '';
+    return `${u.protocol}//${u.hostname}${port}`;
+  } catch {
+    return 'invalid-uri';
+  }
+}
+
 /** @type {Redis | null} */
 let pub = null;
 /** @type {Redis | null} */
@@ -36,10 +70,18 @@ export async function publishToCluster(businessId, payload) {
  * @returns {Promise<boolean>} whether cluster mode is active
  */
 export async function initRealtimeRedis(redisUrl) {
-  const raw = typeof redisUrl === 'string' ? redisUrl.trim() : '';
+  const trimmed = typeof redisUrl === 'string' ? redisUrl.trim() : '';
+  const raw = normalizeRedisUrl(redisUrl);
   if (!raw) {
     log('info', 'realtime_redis_skipped', { reason: 'REDIS_URL unset' });
     return false;
+  }
+
+  if (trimmed && raw !== trimmed) {
+    log('info', 'realtime_redis_url_normalized', {
+      hint: redisHostHint(raw),
+      note: 'Use a bare redis:// or rediss:// URI in REDIS_URL (not redis-cli -u …)',
+    });
   }
 
   try {
