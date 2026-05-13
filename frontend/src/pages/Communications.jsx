@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api.js';
 import { subscribeRealtime } from '../realtime/socket.js';
@@ -19,6 +20,32 @@ function metaStatusBadgeClass(status) {
     return 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300';
   }
   return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+}
+
+const BUILTIN_CATEGORY_ORDER = ['SYSTEM', 'BUSINESS', 'CUSTOMER', 'APPOINTMENT', 'PAYMENT'];
+
+function insertAtCursor(textareaRef, snippet, setValue) {
+  const el = textareaRef?.current;
+  if (!el) {
+    setValue((prev) => String(prev || '') + snippet);
+    return;
+  }
+  const start = typeof el.selectionStart === 'number' ? el.selectionStart : el.value.length;
+  const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : el.value.length;
+  const v = el.value;
+  const next = v.slice(0, start) + snippet + v.slice(end);
+  flushSync(() => {
+    setValue(next);
+  });
+  requestAnimationFrame(() => {
+    el.focus();
+    const pos = start + snippet.length;
+    try {
+      el.setSelectionRange(pos, pos);
+    } catch {
+      /* ignore */
+    }
+  });
 }
 
 function displayMetaStatus(status) {
@@ -140,6 +167,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   const [cloneSubmitting, setCloneSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState(forcedTab || 'WALLET');
   const navigate = useNavigate();
+  const templateBodyRef = useRef(null);
 
   useEffect(() => {
     if (forcedTab && tabs.includes(forcedTab)) {
@@ -451,7 +479,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         .filter((r) => r.variableKey && String(r.variableKey).trim())
         .map((r) => ({
           placeholderIndex: r.placeholderIndex,
-          variableKey: String(r.variableKey).trim().toLowerCase(),
+          variableKey: String(r.variableKey).trim(),
         }));
       await api.put(`/templates/${mappingModalId}/variable-mappings`, { mappings });
       setInfo('Template field mapping saved', 'TEMPLATES');
@@ -465,10 +493,29 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
 
   const selectableVariableKeys = useMemo(() => {
     const s = new Set();
-    builtins.forEach((b) => s.add(b.key));
+    builtins.forEach((b) => {
+      s.add(b.key);
+      if (b.namespace && b.namespace !== b.key) s.add(b.namespace);
+    });
     fieldDefs.forEach((d) => s.add(d.key));
     return [...s].sort();
   }, [builtins, fieldDefs]);
+
+  const builtinsByCategory = useMemo(() => {
+    const m = {};
+    builtins.forEach((b) => {
+      const c = b.category || 'SYSTEM';
+      if (!m[c]) m[c] = [];
+      m[c].push(b);
+    });
+    return m;
+  }, [builtins]);
+
+  function insertTemplateToken(rawKey) {
+    const k = String(rawKey || '').trim();
+    if (!k) return;
+    insertAtCursor(templateBodyRef, `{{${k}}}`, setTemplateContent);
+  }
 
   /** Refetch wallet, contacts, templates, contact book, and (when relevant) wallet transactions. */
   async function loadAll() {
@@ -1166,21 +1213,29 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
           {activeTab === 'FIELDS' && (
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-                <div className="font-semibold">Built-in fields</div>
+                <div className="font-semibold">Built-in &amp; computed fields</div>
                 <p className="text-xs text-slate-500">
                   Business display values are edited per client under{' '}
-                  <strong>Settings → Client profile — templates &amp; campaigns</strong>. Optional server env vars{' '}
-                  <code className="font-mono">BUSINESS_DISPLAY_PHONE</code> and <code className="font-mono">SUPPORT_PHONE</code>{' '}
-                  apply only when those profile fields are empty.
+                  <strong>Settings → Client profile — templates &amp; campaigns</strong>. Appointment and payment
+                  values resolve per customer when you send to a <strong>customer</strong> (not a bare contact row).
+                  Use dotted names (e.g. <code className="font-mono">customer.name</code>) or legacy snake_case (
+                  <code className="font-mono">customer_name</code>) — both work.
                 </p>
-                <ul className="text-sm grid sm:grid-cols-2 gap-2">
-                  {builtins.map((b) => (
-                    <li key={b.key} className="rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
-                      <span className="font-mono text-brand-700">{b.key}</span>
-                      <span className="text-slate-500"> — {b.label}</span>
-                    </li>
+                <div className="space-y-4">
+                  {BUILTIN_CATEGORY_ORDER.filter((c) => (builtinsByCategory[c] || []).length).map((cat) => (
+                    <div key={cat}>
+                      <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">{cat}</div>
+                      <ul className="text-sm grid sm:grid-cols-2 gap-2">
+                        {(builtinsByCategory[cat] || []).map((b) => (
+                          <li key={b.key} className="rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                            <div className="font-mono text-brand-700 text-xs">{b.namespace || b.key}</div>
+                            <div className="text-slate-500 text-xs mt-0.5">{b.label}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
@@ -1422,7 +1477,41 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
               placeholder="Template name"
               className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
             />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-500">Insert variable</span>
+              <select
+                aria-label="Insert template variable"
+                className="max-w-[min(100%,280px)] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-xs"
+                defaultValue=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v) insertTemplateToken(v);
+                  e.target.value = '';
+                }}
+              >
+                <option value="">Choose…</option>
+                {BUILTIN_CATEGORY_ORDER.map((cat) => (
+                  <optgroup key={cat} label={cat}>
+                    {(builtinsByCategory[cat] || []).map((b) => (
+                      <option key={b.key} value={b.key}>
+                        {b.namespace ? `${b.namespace} → ${b.key}` : b.key} — {b.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+                {fieldDefs.length ? (
+                  <optgroup label="Custom fields">
+                    {fieldDefs.map((d) => (
+                      <option key={d.id} value={d.key}>
+                        {d.key}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+              </select>
+            </div>
             <textarea
+              ref={templateBodyRef}
               rows={6}
               value={templateContent}
               onChange={(e) => setTemplateContent(e.target.value)}

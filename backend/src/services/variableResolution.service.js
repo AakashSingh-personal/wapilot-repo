@@ -1,21 +1,12 @@
 import { prisma } from '../lib/prisma.js';
-import { parseCatalog } from '../utils/businessCatalog.js';
+import {
+  buildTemplateContext,
+  canonicalizeVariableKey,
+  RESERVED_ENGINE_KEYS,
+} from './dynamicFieldEngine.service.js';
 
-/** Keys resolved from business / customer / clock — cannot be redefined as custom fields. */
-export const RESERVED_VARIABLE_KEYS = new Set([
-  'business_name',
-  'business_phone',
-  'business_owner_name',
-  'business_support_number',
-  'owner_name',
-  'support_number',
-  'current_date',
-  'current_time',
-  'customer_name',
-  'customer_phone',
-  'name',
-  'phone',
-]);
+/** @deprecated use RESERVED_ENGINE_KEYS — kept for imports */
+export const RESERVED_VARIABLE_KEYS = RESERVED_ENGINE_KEYS;
 
 const PLACEHOLDER_RE = /\{\{\s*([^}]+?)\s*\}\}/g;
 
@@ -37,73 +28,6 @@ export function extractTemplatePlaceholders(text) {
   };
 }
 
-function normalizeKey(key) {
-  return String(key || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '_');
-}
-
-function formatDisplayDate(d) {
-  try {
-    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  } catch {
-    return '';
-  }
-}
-
-function formatDisplayTime(d) {
-  try {
-    return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
-
-function ownerNameFromUser(owner) {
-  const email = owner?.email || '';
-  const at = email.indexOf('@');
-  return (at > 0 ? email.slice(0, at) : email).trim() || email;
-}
-
-function resolveBuiltin({
-  key,
-  business,
-  owner,
-  customer,
-  contactName,
-  contactPhone,
-  now,
-  clientProfile,
-}) {
-  const cp = clientProfile || {};
-
-  switch (key) {
-    case 'name':
-    case 'customer_name':
-      return String(customer?.name || contactName || '').trim();
-    case 'phone':
-    case 'customer_phone':
-      return String(customer?.phone || contactPhone || '').trim();
-    case 'business_name':
-      return String(cp.business_name || business?.name || '').trim();
-    case 'business_phone':
-      return String(cp.business_phone || process.env.BUSINESS_DISPLAY_PHONE || '').trim();
-    case 'business_owner_name':
-    case 'owner_name':
-      return String(cp.business_owner_name || ownerNameFromUser(owner)).trim();
-    case 'business_support_number':
-    case 'support_number':
-      return String(cp.business_support_number || process.env.SUPPORT_PHONE || '').trim();
-    case 'current_date':
-      return formatDisplayDate(now);
-    case 'current_time':
-      return formatDisplayTime(now);
-    default:
-      return '';
-  }
-}
-
 /**
  * @param {object} opts
  * @param {string} opts.businessId
@@ -123,74 +47,52 @@ export async function resolvePersonalizedTemplateText(opts) {
     contactPhone = null,
   } = opts;
 
-  const [business, mappings, definitions, customer, customerValues] = await Promise.all([
-    prisma.business.findUnique({
-      where: { id: businessId },
-      include: { config: true },
-    }),
+  const [mappings, definitions, customerValues, context] = await Promise.all([
     prisma.templateVariableMapping.findMany({
       where: { templateId: template.id },
       orderBy: { placeholderIndex: 'asc' },
     }),
     prisma.variableDefinition.findMany({ where: { businessId } }),
     customerId
-      ? prisma.customer.findFirst({
-          where: { id: customerId, businessId },
-        })
-      : null,
-    customerId
       ? prisma.customerVariableValue.findMany({
           where: { customerId },
         })
       : [],
+    buildTemplateContext({
+      businessId,
+      customerId,
+      contactName,
+      contactPhone,
+    }),
   ]);
 
-  const owner =
-    business?.ownerId &&
-    (await prisma.user.findFirst({
-      where: { id: business.ownerId },
-      select: { email: true },
-    }));
-
-  const catalog = parseCatalog(business?.config?.services);
-  const clientProfile = catalog.clientProfile;
-
   const definitionByKey = new Map(
-    definitions.map((d) => [normalizeKey(d.key), d]),
+    definitions.map((d) => [canonicalizeVariableKey(d.key), d]),
   );
   const valueByDefId = new Map(
     customerValues.map((v) => [v.variableDefinitionId, v.value]),
   );
   const indexToVariableKey = new Map(
-    mappings.map((m) => [m.placeholderIndex, m.variableKey]),
+    mappings.map((m) => [m.placeholderIndex, canonicalizeVariableKey(m.variableKey)]),
   );
 
   const overrides = {};
   for (const [k, v] of Object.entries(extraVariables || {})) {
-    overrides[normalizeKey(k)] = v === undefined || v === null ? '' : String(v);
+    const ck = canonicalizeVariableKey(k);
+    if (!ck) continue;
+    overrides[ck] = v === undefined || v === null ? '' : String(v);
   }
 
-  const now = new Date();
-
   const resolveKey = (rawKey) => {
-    const k = normalizeKey(rawKey);
+    const k = canonicalizeVariableKey(rawKey);
     if (!k) return '';
 
     if (Object.prototype.hasOwnProperty.call(overrides, k)) {
       return overrides[k];
     }
 
-    if (RESERVED_VARIABLE_KEYS.has(k)) {
-      return resolveBuiltin({
-        key: k,
-        business,
-        owner,
-        customer,
-        contactName,
-        contactPhone,
-        now,
-        clientProfile,
-      });
+    if (RESERVED_ENGINE_KEYS.has(k)) {
+      return context[k] ?? '';
     }
 
     const def = definitionByKey.get(k);
