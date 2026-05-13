@@ -1,8 +1,9 @@
 import * as hub from './hub.js';
+import { log } from '../utils/logger.js';
+import { isRealtimeClusterEnabled, publishToCluster } from './redisBridge.js';
 
 /**
- * Optional adapter for horizontal scaling (e.g. Redis Pub/Sub). When set, `publish`
- * delegates to the adapter instead of the in-process hub.
+ * Optional adapter for custom fan-out (runs first when set). Prefer `REDIS_URL` + built-in bridge.
  * @type {null | ((event: Record<string, unknown>) => void | Promise<void>)}
  */
 let remotePublishAdapter = null;
@@ -13,7 +14,8 @@ export function setRemotePublishAdapter(fn) {
 
 /**
  * Publish a realtime notification for a business.
- * Future: swap implementation for Redis Pub/Sub without changing call sites.
+ * With `REDIS_URL`, events go through Redis Pub/Sub so every app instance delivers to its local sockets.
+ * Without Redis, broadcasts only on this process (single-instance).
  *
  * @param {{
  *   businessId: string,
@@ -44,5 +46,16 @@ export async function publish(event) {
     ts: Date.now(),
   };
 
-  hub.broadcastToBusiness(String(businessId), payload);
+  const bid = String(businessId);
+
+  if (isRealtimeClusterEnabled()) {
+    try {
+      await publishToCluster(bid, payload);
+      return;
+    } catch (e) {
+      log('warn', 'realtime_cluster_publish_failed', { message: e.message, businessId: bid });
+    }
+  }
+
+  hub.broadcastToBusiness(bid, payload);
 }
