@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma.js';
+import { log } from '../utils/logger.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
 import { structuredContent } from '../utils/waStructuredMessage.js';
 import { createWhatsAppTemplate, listWhatsAppTemplates } from '../services/whatsapp.service.js';
@@ -819,17 +820,32 @@ export async function sendTemplateCommunication(req, res, next) {
             type: 'STAFF',
           },
         });
-        await prisma.customer.update({
-          where: { id: customerRecord.id },
-          data: {
-            aiOverride: true,
-            aiOverrideByUserId: req.user.userId,
-            aiOverrideAt: new Date(),
-          },
-        });
         sentCount += 1;
         totalCharged += MESSAGE_COST_INR;
-      } catch {
+
+        try {
+          const pauseBy = req.user?.userId ?? null;
+          await prisma.customer.update({
+            where: { id: customerRecord.id },
+            data: {
+              aiOverride: true,
+              aiOverrideByUserId: pauseBy,
+              aiOverrideAt: new Date(),
+            },
+          });
+        } catch (pauseErr) {
+          log('warn', 'communications_ai_pause_failed', {
+            message: pauseErr.message,
+            code: pauseErr.code,
+            customerId: customerRecord.id,
+          });
+        }
+      } catch (loopErr) {
+        log('warn', 'communications_send_iteration_failed', {
+          message: loopErr.message,
+          code: loopErr.code,
+          phone: target.phone,
+        });
         failedCount += 1;
       }
     }
@@ -848,15 +864,32 @@ export async function sendTemplateCommunication(req, res, next) {
 
     const wallet = await prisma.wallet.findUnique({ where: { businessId: req.user.businessId } });
 
+    const c = updatedCampaign;
     res.json({
-      campaign: updatedCampaign,
+      campaign: {
+        id: c.id,
+        businessId: c.businessId,
+        templateId: c.templateId,
+        status: c.status,
+        totalContacts: c.totalContacts,
+        sentCount: c.sentCount,
+        failedCount: c.failedCount,
+        totalCharged: Number(c.totalCharged),
+        messageCost: Number(c.messageCost),
+        createdAt: c.createdAt,
+      },
       sentCount,
       failedCount,
       blocked,
-      walletBalance: wallet?.balance || '0',
+      walletBalance: wallet ? Number(wallet.balance) : 0,
       messageCost: MESSAGE_COST_INR,
     });
   } catch (e) {
+    log('error', 'communications_send_failed', {
+      message: e.message,
+      code: e.code,
+      meta: e.meta,
+    });
     next(e);
   }
 }

@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma.js';
+import { log } from '../utils/logger.js';
 import { sendWhatsAppImageUrl, sendWhatsAppText } from '../services/whatsapp.service.js';
 import { structuredContent } from '../utils/waStructuredMessage.js';
 import { sessionAllowsFreeForm } from '../utils/conversationStatus.js';
@@ -101,14 +102,22 @@ export async function sendMessage(req, res, next) {
       },
     });
 
-    await prisma.customer.update({
-      where: { id: customerId },
-      data: {
-        aiOverride: true,
-        aiOverrideByUserId: req.user.userId,
-        aiOverrideAt: new Date(),
-      },
-    });
+    try {
+      await prisma.customer.update({
+        where: { id: customerId },
+        data: {
+          aiOverride: true,
+          aiOverrideByUserId: req.user?.userId ?? null,
+          aiOverrideAt: new Date(),
+        },
+      });
+    } catch (pauseErr) {
+      log('warn', 'staff_send_ai_pause_failed', {
+        message: pauseErr.message,
+        code: pauseErr.code,
+        customerId,
+      });
+    }
 
     res.json({ ok: true });
   } catch (e) {
