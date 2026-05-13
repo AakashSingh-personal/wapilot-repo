@@ -68,6 +68,11 @@ enum CampaignStatus {
   FAILED
 }
 
+enum VariableDefinitionType {
+  BUSINESS
+  CUSTOMER
+}
+
 enum WalletTxnType {
   CREDIT
   DEBIT
@@ -99,6 +104,7 @@ model Business {
   campaigns        CommunicationCampaign[]
   wallet           Wallet?
   walletTxns       WalletTransaction[]
+  variableDefinitions VariableDefinition[]
 }
 
 model User {
@@ -138,6 +144,7 @@ model Customer {
   messages Message[]
   bookings Booking[]
   payments CustomerPayment[]
+  variableValues CustomerVariableValue[]
 
   @@unique([businessId, phone])
   @@index([businessId])
@@ -269,8 +276,53 @@ model Template {
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   campaigns CommunicationCampaign[]
+  variableMappings TemplateVariableMapping[]
 
   @@index([businessId])
+}
+
+model VariableDefinition {
+  id             String                 @id @default(uuid()) @db.Uuid
+  businessId     String                 @db.Uuid
+  key            String
+  label          String
+  type           VariableDefinitionType
+  description    String                 @default("")
+  defaultValue   String                 @default("")
+  isEditable     Boolean                @default(true)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  business       Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerValues CustomerVariableValue[]
+
+  @@unique([businessId, key])
+  @@index([businessId])
+}
+
+model CustomerVariableValue {
+  id                   String             @id @default(uuid()) @db.Uuid
+  customerId           String             @db.Uuid
+  variableDefinitionId String             @db.Uuid
+  value                String             @default("")
+
+  customer   Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  definition VariableDefinition @relation(fields: [variableDefinitionId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, variableDefinitionId])
+  @@index([variableDefinitionId])
+}
+
+model TemplateVariableMapping {
+  id               String   @id @default(uuid()) @db.Uuid
+  templateId       String   @db.Uuid
+  placeholderIndex Int
+  variableKey      String
+
+  template Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, placeholderIndex])
+  @@index([templateId])
 }
 
 model CommunicationCampaign {

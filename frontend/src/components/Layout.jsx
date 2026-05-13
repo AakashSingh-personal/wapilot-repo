@@ -20,6 +20,7 @@ function buildNav(role) {
     { to: '/communications/wallet', label: 'Wallet', icon: '💰' },
     { to: '/communications/send', label: 'Send Communication', icon: '📤' },
     { to: '/communications/templates', label: 'Templates', icon: '🧩' },
+    { to: '/communications/fields', label: 'Personalization fields', icon: '✨' },
     { to: '/communications/contacts', label: 'Upload Contacts', icon: '📇' },
     { to: '/communications/contact-book', label: 'Contact Book', icon: '📒' },
     { to: '/billing', label: 'Billing', icon: '🧾' },

@@ -5,6 +5,7 @@ import * as paymentLinkController from '../controllers/paymentLink.controller.js
 import * as configController from '../controllers/config.controller.js';
 import * as billingController from '../controllers/billing.controller.js';
 import * as communicationController from '../controllers/communication.controller.js';
+import * as variablesController from '../controllers/variables.controller.js';
 import * as adminController from '../controllers/admin.controller.js';
 import * as userManagementController from '../controllers/userManagement.controller.js';
 import { prisma } from '../lib/prisma.js';
@@ -70,7 +71,20 @@ router.delete('/user-management/users/:id', authMiddleware, userManagementContro
 router.get('/templates', authMiddleware, communicationController.listTemplates);
 router.get('/templates/meta-options', authMiddleware, communicationController.metaTemplateOptions);
 router.post('/templates', authMiddleware, communicationController.createTemplate);
+router.get('/templates/:id/placeholders', authMiddleware, variablesController.getTemplatePlaceholders);
+router.get('/templates/:id/variable-mappings', authMiddleware, variablesController.getVariableMappings);
+router.put('/templates/:id/variable-mappings', authMiddleware, variablesController.putVariableMappings);
+router.post('/templates/:id/preview', authMiddleware, variablesController.previewTemplate);
 router.patch('/templates/:id/status', authMiddleware, communicationController.updateTemplateStatus);
+
+router.get('/variables/catalog', authMiddleware, variablesController.getCatalog);
+router.get('/variables/definitions', authMiddleware, variablesController.listDefinitions);
+router.post('/variables/definitions', authMiddleware, variablesController.createDefinition);
+router.patch('/variables/definitions/:id', authMiddleware, variablesController.updateDefinition);
+router.delete('/variables/definitions/:id', authMiddleware, variablesController.deleteDefinition);
+router.get('/variables/customers/:customerId', authMiddleware, variablesController.getCustomerValues);
+router.patch('/variables/customers/:customerId', authMiddleware, variablesController.patchCustomerValues);
+router.post('/variables/import-csv', authMiddleware, variablesController.importCustomerVariablesCsv);
 
 router.post('/communications/send', authMiddleware, communicationController.sendTemplateCommunication);
 

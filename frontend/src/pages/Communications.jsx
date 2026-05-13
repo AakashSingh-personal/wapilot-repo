@@ -41,7 +41,7 @@ const META_LIMITS = {
 
 export default function Communications({ forcedTab = null, templateMode = 'combined' }) {
   const TXN_PAGE_SIZE = 20;
-  const tabs = ['WALLET', 'SEND', 'TEMPLATES', 'CONTACTS', 'CONTACT_BOOK'];
+  const tabs = ['WALLET', 'SEND', 'TEMPLATES', 'FIELDS', 'CONTACTS', 'CONTACT_BOOK'];
   const tabMeta = {
     WALLET: {
       title: 'Wallet',
@@ -54,6 +54,10 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     TEMPLATES: {
       title: 'Templates',
       subtitle: 'Create templates, review status, and sync updates from Meta.',
+    },
+    FIELDS: {
+      title: 'Personalization fields',
+      subtitle: 'Business-wide and per-customer values. Map Meta {{1}} placeholders to friendly keys on each template.',
     },
     CONTACTS: {
       title: 'Upload Contacts',
@@ -112,6 +116,20 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedBulk, setSelectedBulk] = useState({});
   const [sending, setSending] = useState(false);
+  const [fieldDefs, setFieldDefs] = useState([]);
+  const [builtins, setBuiltins] = useState([]);
+  const [newFieldKey, setNewFieldKey] = useState('');
+  const [newFieldLabel, setNewFieldLabel] = useState('');
+  const [newFieldType, setNewFieldType] = useState('BUSINESS');
+  const [newFieldDefault, setNewFieldDefault] = useState('');
+  const [fieldsCsvPaste, setFieldsCsvPaste] = useState('');
+  const [fieldsPhoneCol, setFieldsPhoneCol] = useState('phone');
+  const [fieldsVarCols, setFieldsVarCols] = useState('');
+  const [fieldsSaving, setFieldsSaving] = useState(false);
+  const [mappingModalId, setMappingModalId] = useState('');
+  const [mappingRows, setMappingRows] = useState([]);
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [sendPreview, setSendPreview] = useState('');
   const [activeTab, setActiveTab] = useState(forcedTab || 'WALLET');
   const navigate = useNavigate();
 
@@ -145,6 +163,42 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     () => asArray(templates).find((t) => t.id === selectedTemplateId),
     [templates, selectedTemplateId],
   );
+
+  useEffect(() => {
+    if (activeTab !== 'SEND') {
+      setSendPreview('');
+      return;
+    }
+    if (!selectedTemplateId || bulkMode) {
+      setSendPreview('');
+      return;
+    }
+    const cid = selectedContactId;
+    if (!cid) {
+      setSendPreview('');
+      return;
+    }
+    const c = contacts.find((x) => x.id === cid);
+    if (!c) {
+      setSendPreview('');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.post(`/templates/${selectedTemplateId}/preview`, {
+          contactName: c.name,
+          contactPhone: c.phone,
+        });
+        if (!cancelled) setSendPreview(String(data?.preview || ''));
+      } catch {
+        if (!cancelled) setSendPreview('');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, selectedTemplateId, selectedContactId, bulkMode, contacts]);
 
   const builderValidationErrors = useMemo(() => {
     const errs = [];
@@ -281,6 +335,133 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     }
   }
 
+  async function loadPersonalizationCatalog() {
+    const { data } = await api.get('/variables/catalog');
+    setBuiltins(asArray(data?.builtins));
+  }
+
+  async function loadPersonalizationDefinitions() {
+    const { data } = await api.get('/variables/definitions');
+    setFieldDefs(asArray(data?.definitions));
+  }
+
+  async function createFieldDefinition() {
+    setError('', 'FIELDS');
+    setInfo('', 'FIELDS');
+    setFieldsSaving(true);
+    try {
+      await api.post('/variables/definitions', {
+        key: newFieldKey.trim(),
+        label: newFieldLabel.trim(),
+        type: newFieldType,
+        defaultValue: newFieldDefault,
+      });
+      setNewFieldKey('');
+      setNewFieldLabel('');
+      setNewFieldDefault('');
+      setInfo('Field created', 'FIELDS');
+      await loadPersonalizationDefinitions();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not create field', 'FIELDS');
+    } finally {
+      setFieldsSaving(false);
+    }
+  }
+
+  async function deleteFieldDefinition(id) {
+    if (!window.confirm('Delete this field? Customer values for it will be removed.')) return;
+    setError('', 'FIELDS');
+    try {
+      await api.delete(`/variables/definitions/${id}`);
+      setInfo('Field deleted', 'FIELDS');
+      await loadPersonalizationDefinitions();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Delete failed', 'FIELDS');
+    }
+  }
+
+  async function importFieldCsv() {
+    setError('', 'FIELDS');
+    setInfo('', 'FIELDS');
+    const cols = fieldsVarCols
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!cols.length) {
+      setError('List variable column keys (comma-separated), matching CUSTOMER fields.', 'FIELDS');
+      return;
+    }
+    setFieldsSaving(true);
+    try {
+      const { data } = await api.post('/variables/import-csv', {
+        csvText: fieldsCsvPaste,
+        phoneColumn: fieldsPhoneCol.trim() || 'phone',
+        variableColumns: cols,
+      });
+      setInfo(
+        `Import done: ${data.customersUpdated} contact(s) updated, ${data.skipped} row(s) skipped.`,
+        'FIELDS',
+      );
+      setFieldsCsvPaste('');
+    } catch (e) {
+      setError(e.response?.data?.error || 'Import failed', 'FIELDS');
+    } finally {
+      setFieldsSaving(false);
+    }
+  }
+
+  async function openMappingModal(templateId) {
+    setMappingModalId(templateId);
+    setMappingLoading(true);
+    setError('', 'TEMPLATES');
+    try {
+      const [{ data: ph }, { data: mp }] = await Promise.all([
+        api.get(`/templates/${templateId}/placeholders`),
+        api.get(`/templates/${templateId}/variable-mappings`),
+      ]);
+      const numbered = asArray(ph?.extracted?.numbered);
+      const existing = new Map(asArray(mp?.mappings).map((m) => [m.placeholderIndex, m.variableKey]));
+      setMappingRows(
+        numbered.map((n) => ({
+          placeholderIndex: n,
+          variableKey: existing.get(n) || '',
+        })),
+      );
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not load placeholders', 'TEMPLATES');
+      setMappingModalId('');
+    } finally {
+      setMappingLoading(false);
+    }
+  }
+
+  async function saveTemplateMappings() {
+    if (!mappingModalId) return;
+    setMappingLoading(true);
+    try {
+      const mappings = mappingRows
+        .filter((r) => r.variableKey && String(r.variableKey).trim())
+        .map((r) => ({
+          placeholderIndex: r.placeholderIndex,
+          variableKey: String(r.variableKey).trim().toLowerCase(),
+        }));
+      await api.put(`/templates/${mappingModalId}/variable-mappings`, { mappings });
+      setInfo('Template field mapping saved', 'TEMPLATES');
+      setMappingModalId('');
+    } catch (e) {
+      setError(e.response?.data?.error || 'Save failed', 'TEMPLATES');
+    } finally {
+      setMappingLoading(false);
+    }
+  }
+
+  const selectableVariableKeys = useMemo(() => {
+    const s = new Set();
+    builtins.forEach((b) => s.add(b.key));
+    fieldDefs.forEach((d) => s.add(d.key));
+    return [...s].sort();
+  }, [builtins, fieldDefs]);
+
   /** Refetch wallet, contacts, templates, contact book, and (when relevant) wallet transactions. */
   async function loadAll() {
     await refreshWallet();
@@ -380,7 +561,14 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         } else if (activeTab === 'SEND') {
           await Promise.all([ensureWalletLoaded(), ensureContactsLoaded(), ensureTemplatesLoaded()]);
         } else if (activeTab === 'TEMPLATES') {
-          await Promise.all([ensureTemplatesLoaded(), ensureMetaTemplateOptionsLoaded()]);
+          await Promise.all([
+            ensureTemplatesLoaded(),
+            ensureMetaTemplateOptionsLoaded(),
+            loadPersonalizationCatalog(),
+            loadPersonalizationDefinitions(),
+          ]);
+        } else if (activeTab === 'FIELDS') {
+          await Promise.all([loadPersonalizationCatalog(), loadPersonalizationDefinitions()]);
         } else if (activeTab === 'CONTACT_BOOK') {
           await loadContactBook();
         } else if (activeTab === 'CONTACTS') {
@@ -674,7 +862,11 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                       ? 'Send Communication'
                       : tab === 'TEMPLATES'
                         ? 'Template Creation & Listing'
-                        : 'Upload Contacts'}
+                        : tab === 'FIELDS'
+                          ? 'Personalization fields'
+                          : tab === 'CONTACT_BOOK'
+                            ? 'Contact Book'
+                            : 'Upload Contacts'}
                 </button>
               ))}
             </nav>
@@ -806,6 +998,141 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
             </>
           )}
 
+          {activeTab === 'FIELDS' && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
+                <div className="font-semibold">Built-in fields</div>
+                <p className="text-xs text-slate-500">
+                  Always available for templates (configure display phone via{' '}
+                  <code className="font-mono">BUSINESS_DISPLAY_PHONE</code> and{' '}
+                  <code className="font-mono">SUPPORT_PHONE</code> in server env).
+                </p>
+                <ul className="text-sm grid sm:grid-cols-2 gap-2">
+                  {builtins.map((b) => (
+                    <li key={b.key} className="rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
+                      <span className="font-mono text-brand-700">{b.key}</span>
+                      <span className="text-slate-500"> — {b.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
+                <div className="font-semibold">Custom fields</div>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <input
+                    value={newFieldKey}
+                    onChange={(e) => setNewFieldKey(e.target.value)}
+                    placeholder="Key (e.g. offer_code)"
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  />
+                  <input
+                    value={newFieldLabel}
+                    onChange={(e) => setNewFieldLabel(e.target.value)}
+                    placeholder="Label shown in UI"
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  />
+                  <select
+                    value={newFieldType}
+                    onChange={(e) => setNewFieldType(e.target.value)}
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  >
+                    <option value="BUSINESS">Business — same value for every customer</option>
+                    <option value="CUSTOMER">Customer — different per contact / customer</option>
+                  </select>
+                  <input
+                    value={newFieldDefault}
+                    onChange={(e) => setNewFieldDefault(e.target.value)}
+                    placeholder="Default value"
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={fieldsSaving}
+                  onClick={createFieldDefinition}
+                  className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold"
+                >
+                  {fieldsSaving ? 'Saving…' : 'Create field'}
+                </button>
+                <table className="min-w-full text-sm mt-4">
+                  <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
+                    <tr>
+                      <th className="px-3 py-2">Key</th>
+                      <th className="px-3 py-2">Label</th>
+                      <th className="px-3 py-2">Type</th>
+                      <th className="px-3 py-2">Default</th>
+                      <th className="px-3 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {fieldDefs.map((d) => (
+                      <tr key={d.id}>
+                        <td className="px-3 py-2 font-mono">{d.key}</td>
+                        <td className="px-3 py-2">{d.label}</td>
+                        <td className="px-3 py-2">{d.type}</td>
+                        <td className="px-3 py-2 max-w-xs truncate">{d.defaultValue}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            type="button"
+                            className="text-rose-700 text-xs font-semibold"
+                            onClick={() => deleteFieldDefinition(d.id)}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!fieldDefs.length && (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                          No custom fields yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
+                <div className="font-semibold">Bulk update customer fields (CSV)</div>
+                <p className="text-xs text-slate-500">
+                  First row headers. Include a phone column (E.164). List CUSTOMER field keys as columns to import
+                  (must match keys you created above).
+                </p>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <input
+                    value={fieldsPhoneCol}
+                    onChange={(e) => setFieldsPhoneCol(e.target.value)}
+                    placeholder="Phone column name (default: phone)"
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  />
+                  <input
+                    value={fieldsVarCols}
+                    onChange={(e) => setFieldsVarCols(e.target.value)}
+                    placeholder="Variable columns: loyalty_points, preferred_service"
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  />
+                </div>
+                <textarea
+                  rows={6}
+                  value={fieldsCsvPaste}
+                  onChange={(e) => setFieldsCsvPaste(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-mono"
+                  placeholder={'phone,loyalty_points\n+919876543210,120'}
+                />
+                <button
+                  type="button"
+                  disabled={fieldsSaving}
+                  onClick={importFieldCsv}
+                  className="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 py-2 text-sm font-semibold"
+                >
+                  {fieldsSaving ? 'Importing…' : 'Import CSV'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'CONTACTS' && (
             <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
               <div className="font-semibold">Upload contacts</div>
@@ -928,7 +1255,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
               rows={6}
               value={templateContent}
               onChange={(e) => setTemplateContent(e.target.value)}
-              placeholder="Hi {{name}}, this is a reminder from our team."
+              placeholder="Hi {{customer_name}}, this is a reminder from {{business_name}}."
               className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
             />
             <div className="text-[11px] text-slate-500">
@@ -1152,6 +1479,11 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                 Create Template
               </button>
             </div>
+            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 text-xs text-slate-500">
+              Use friendly keys in the body (e.g. <code className="font-mono">{'{{customer_name}}'}</code>,{' '}
+              <code className="font-mono">{'{{offer_code}}'}</code>). For Meta-style numbered variables, use &quot;Map
+              fields&quot; on each template.
+            </div>
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
                 <tr>
@@ -1178,7 +1510,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                       </span>
                     </td>
                     <td className="px-4 py-3">{t.status}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 space-x-2">
                       <button
                         type="button"
                         disabled={syncingTemplateId === t.id}
@@ -1186,6 +1518,13 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                         onClick={() => updateTemplateStatus(t.id)}
                       >
                         {syncingTemplateId === t.id ? 'Syncing...' : 'Sync from Meta'}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+                        onClick={() => openMappingModal(t.id)}
+                      >
+                        Map {'{{n}}'}
                       </button>
                     </td>
                   </tr>
@@ -1199,6 +1538,67 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                 )}
               </tbody>
             </table>
+            {mappingModalId && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                <div className="max-w-lg w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-5 space-y-4">
+                  <div className="font-semibold text-sm">Map numbered placeholders</div>
+                  {mappingLoading && !mappingRows.length ? (
+                    <div className="text-sm text-slate-500">Loading…</div>
+                  ) : !mappingRows.length ? (
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      This template has no <code className="font-mono">{'{{1}}'}</code>-style placeholders. Use named
+                      keys in the template body instead.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-72 overflow-y-auto">
+                      {mappingRows.map((row, idx) => (
+                        <div key={row.placeholderIndex} className="grid grid-cols-[1fr_2fr] gap-2 items-center">
+                          <span className="text-xs font-mono text-slate-600">
+                            {'{{'}
+                            {row.placeholderIndex}
+                            {'}}'}
+                          </span>
+                          <select
+                            value={row.variableKey}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setMappingRows((prev) =>
+                                prev.map((r, i) => (i === idx ? { ...r, variableKey: v } : r)),
+                              );
+                            }}
+                            className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm"
+                          >
+                            <option value="">— Select field —</option>
+                            {selectableVariableKeys.map((k) => (
+                              <option key={k} value={k}>
+                                {k}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm"
+                      onClick={() => setMappingModalId('')}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={mappingLoading || !mappingRows.length}
+                      className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+                      onClick={() => saveTemplateMappings()}
+                    >
+                      Save mapping
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           )}
             </>
@@ -1272,8 +1672,22 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                     : 0}
               </div>
               {selectedTemplate && (
-                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
-                  Preview: {selectedTemplate.content}
+                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                  <div className="font-semibold text-slate-500">Template source</div>
+                  <div className="font-mono whitespace-pre-wrap break-words">{selectedTemplate.content}</div>
+                  {!bulkMode && sendPreview ? (
+                    <>
+                      <div className="font-semibold text-emerald-800 dark:text-emerald-200 pt-2">
+                        Resolved preview
+                      </div>
+                      <div className="whitespace-pre-wrap break-words">{sendPreview}</div>
+                    </>
+                  ) : null}
+                  {bulkMode ? (
+                    <p className="text-slate-500 pt-1">
+                      Bulk send: open a single contact to see a resolved preview.
+                    </p>
+                  ) : null}
                 </div>
               )}
               <button

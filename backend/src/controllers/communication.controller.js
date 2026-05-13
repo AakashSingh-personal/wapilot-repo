@@ -6,6 +6,7 @@ import { sendWhatsAppText } from '../services/whatsapp.service.js';
 import { structuredContent } from '../utils/waStructuredMessage.js';
 import { createWhatsAppTemplate, listWhatsAppTemplates } from '../services/whatsapp.service.js';
 import { uploadBase64ToSupabase } from '../services/supabase.service.js';
+import { resolvePersonalizedTemplateText } from '../services/variableResolution.service.js';
 import {
   createRazorpayOrder,
   razorpayPublicConfig,
@@ -19,13 +20,6 @@ function normalizePhone(raw) {
   const only = String(raw).trim().replace(/[^\d+]/g, '');
   if (only.startsWith('+')) return only;
   return `+${only}`;
-}
-
-function fillTemplate(template, variables = {}) {
-  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key) => {
-    const v = variables[key];
-    return v === undefined || v === null ? '' : String(v);
-  });
 }
 
 function toMetaTemplateName(name, businessId) {
@@ -778,10 +772,17 @@ export async function sendTemplateCommunication(req, res, next) {
         continue;
       }
 
-      const content = fillTemplate(template.content, {
-        ...variables,
-        name: target.name || variables.name || '',
-        phone: target.phone,
+      const content = await resolvePersonalizedTemplateText({
+        businessId: req.user.businessId,
+        template,
+        extraVariables: {
+          ...variables,
+          ...(target.name ? { name: target.name } : {}),
+          phone: target.phone,
+        },
+        customerId: target.customerId,
+        contactName: target.name || null,
+        contactPhone: target.phone || null,
       });
       try {
         // Debit before calling Meta so we never report "failed" after WhatsApp already accepted the message.
