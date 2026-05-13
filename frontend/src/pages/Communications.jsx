@@ -249,34 +249,42 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     await refreshWallet();
   }
 
-  /** Refetch wallet, contacts, templates, contact book, and (when relevant) wallet transactions. */
-  async function loadAll() {
-    await refreshWallet();
+  async function reloadContactsFromApi() {
     try {
-      const { data: contactsData } = await api.get('/contacts');
-      const list = asArray(contactsData);
+      const { data } = await api.get('/contacts');
+      const list = asArray(data);
       setContacts(list);
       setSelectedContactId((prev) => {
         if (prev && list.some((c) => c.id === prev)) return prev;
         return list[0]?.id || '';
       });
     } catch {
-      // Keep existing contacts list if refresh fails.
+      /* keep existing list */
     }
+  }
+
+  async function reloadTemplatesFromApi() {
     try {
-      const { data: templatesRes } = await api.get('/templates');
-      const templatesData = asArray(templatesRes?.templates || templatesRes);
+      const { data } = await api.get('/templates');
+      const templatesData = asArray(data?.templates || data);
       setTemplates(templatesData);
-      if (templatesRes?.metaSyncError) {
-        setError(`Meta sync issue: ${templatesRes.metaSyncError}`, 'TEMPLATES');
+      if (data?.metaSyncError) {
+        setError(`Meta sync issue: ${data.metaSyncError}`, 'TEMPLATES');
       }
       setSelectedTemplateId((prev) => {
         if (prev && templatesData.some((t) => t.id === prev)) return prev;
         return templatesData[0]?.id || '';
       });
     } catch {
-      // Keep existing templates if refresh fails.
+      /* keep existing templates */
     }
+  }
+
+  /** Refetch wallet, contacts, templates, contact book, and (when relevant) wallet transactions. */
+  async function loadAll() {
+    await refreshWallet();
+    await reloadContactsFromApi();
+    await reloadTemplatesFromApi();
     try {
       await loadContactBook();
     } catch {
@@ -350,7 +358,14 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         // Load only what each tab needs (avoid cross-tab API spam).
         if (activeTab === 'WALLET') {
           await ensureWalletLoaded();
-          await loadWalletTransactions({ filter: txnFilter, offset: 0, append: false });
+          if (!cancelled) {
+            await loadWalletTransactions({
+              filter: txnFilter,
+              offset: 0,
+              append: false,
+              onlyTopups: txnOnlyTopups,
+            });
+          }
         } else if (activeTab === 'SEND') {
           await Promise.all([ensureWalletLoaded(), ensureContactsLoaded(), ensureTemplatesLoaded()]);
         } else if (activeTab === 'TEMPLATES') {
@@ -368,12 +383,37 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, txnFilter, txnOnlyTopups]);
 
+  const AUTO_REFRESH_MS = 10000;
   useEffect(() => {
-    if (activeTab !== 'WALLET') return;
-    // When in wallet tab, refetch transactions if filters change.
-    loadWalletTransactions({ filter: txnFilter, offset: 0, append: false, onlyTopups: txnOnlyTopups });
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      (async () => {
+        try {
+          if (activeTab === 'WALLET') {
+            await refreshWallet();
+            await loadWalletTransactions({
+              filter: txnFilter,
+              offset: 0,
+              append: false,
+              onlyTopups: txnOnlyTopups,
+            });
+          } else if (activeTab === 'SEND') {
+            await refreshWallet();
+            await reloadContactsFromApi();
+            await reloadTemplatesFromApi();
+          } else if (activeTab === 'TEMPLATES') {
+            await reloadTemplatesFromApi();
+          } else if (activeTab === 'CONTACT_BOOK') {
+            await loadContactBook();
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, txnFilter, txnOnlyTopups]);
 
@@ -422,14 +462,6 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       setAddingMoney(false);
     }
   }
-
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (document.hidden) return;
-      loadAll().catch(() => {});
-    }, 5000);
-    return () => clearInterval(t);
-  }, []);
 
   async function uploadContacts() {
     if (!csvText.trim()) return;
