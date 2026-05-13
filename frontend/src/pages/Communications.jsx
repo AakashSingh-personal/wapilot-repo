@@ -1003,9 +1003,10 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
               <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
                 <div className="font-semibold">Built-in fields</div>
                 <p className="text-xs text-slate-500">
-                  Always available for templates (configure display phone via{' '}
-                  <code className="font-mono">BUSINESS_DISPLAY_PHONE</code> and{' '}
-                  <code className="font-mono">SUPPORT_PHONE</code> in server env).
+                  Business display values are edited per client under{' '}
+                  <strong>Settings → Client profile — templates &amp; campaigns</strong>. Optional server env vars{' '}
+                  <code className="font-mono">BUSINESS_DISPLAY_PHONE</code> and <code className="font-mono">SUPPORT_PHONE</code>{' '}
+                  apply only when those profile fields are empty.
                 </p>
                 <ul className="text-sm grid sm:grid-cols-2 gap-2">
                   {builtins.map((b) => (

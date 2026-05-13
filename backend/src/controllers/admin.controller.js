@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
+import { mergeCatalog } from '../utils/businessCatalog.js';
 import { signToken, verifyToken } from '../utils/jwt.js';
 
 function randomPassword(len = 14) {
@@ -79,10 +80,17 @@ export async function onboardClient(req, res, next) {
       await tx.businessConfig.create({
         data: {
           businessId: business.id,
-          services: [{ name: 'Consultation', price: '₹500' }],
+          services: mergeCatalog(null, {
+            services: [{ name: 'Consultation', price: '₹500' }],
+            ...(ownerName
+              ? {
+                  clientDetails: `Owner: ${ownerName}`,
+                  clientProfile: { business_owner_name: ownerName },
+                }
+              : {}),
+          }),
           workingHours: JSON.stringify({ slots: ['3 PM', '5 PM'] }),
           autoReplyEnabled: true,
-          ...(ownerName ? { clientDetails: `Owner: ${ownerName}` } : {}),
         },
       });
       await tx.subscription.create({

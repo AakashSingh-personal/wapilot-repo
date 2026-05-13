@@ -191,6 +191,12 @@ export default function Settings() {
   const [services, setServices] = useState([]);
   const [products, setProducts] = useState([]);
   const [clientDetails, setClientDetails] = useState('');
+  const [clientProfile, setClientProfile] = useState({
+    business_name: '',
+    business_phone: '',
+    business_owner_name: '',
+    business_support_number: '',
+  });
   const [workingHours, setWorkingHours] = useState('{}');
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
   const [upiId, setUpiId] = useState('');
@@ -208,6 +214,12 @@ export default function Settings() {
         setServices(normalizeItems(data.config?.services ?? []));
         setProducts(normalizeItems(data.config?.products ?? []));
         setClientDetails(data.config?.clientDetails || '');
+        setClientProfile({
+          business_name: data.config?.clientProfile?.business_name || '',
+          business_phone: data.config?.clientProfile?.business_phone || '',
+          business_owner_name: data.config?.clientProfile?.business_owner_name || '',
+          business_support_number: data.config?.clientProfile?.business_support_number || '',
+        });
         setWorkingHours(
           typeof data.config?.workingHours === 'string'
             ? data.config.workingHours
@@ -262,6 +274,12 @@ export default function Settings() {
         services: cleanServices,
         products: cleanProducts,
         clientDetails: clientDetails || '',
+        clientProfile: {
+          business_name: clientProfile.business_name?.trim() || '',
+          business_phone: clientProfile.business_phone?.trim() || '',
+          business_owner_name: clientProfile.business_owner_name?.trim() || '',
+          business_support_number: clientProfile.business_support_number?.trim() || '',
+        },
         workingHours: wh,
         autoReplyEnabled,
         upiId: upiId || null,
@@ -339,6 +357,55 @@ export default function Settings() {
             onChange={(e) => setPhoneNumberId(e.target.value)}
             placeholder="Matches webhook metadata.phone_number_id"
           />
+        </div>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/40 p-4 space-y-3">
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Client profile — templates & campaigns
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Shown when messages use{' '}
+            <code className="font-mono text-[11px]">{'{{business_name}}'}</code>,{' '}
+            <code className="font-mono text-[11px]">{'{{business_phone}}'}</code>, etc. Falls back to your legal
+            business name above only if display name is left empty.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">Display business name</label>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                value={clientProfile.business_name}
+                onChange={(e) => setClientProfile((p) => ({ ...p, business_name: e.target.value }))}
+                placeholder="e.g. GlowCraft Salon"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">Display business phone</label>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                value={clientProfile.business_phone}
+                onChange={(e) => setClientProfile((p) => ({ ...p, business_phone: e.target.value }))}
+                placeholder="+91…"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">Owner / public name</label>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                value={clientProfile.business_owner_name}
+                onChange={(e) => setClientProfile((p) => ({ ...p, business_owner_name: e.target.value }))}
+                placeholder="Name customers see"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">Support number</label>
+              <input
+                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                value={clientProfile.business_support_number}
+                onChange={(e) => setClientProfile((p) => ({ ...p, business_support_number: e.target.value }))}
+                placeholder="Support WhatsApp or phone"
+              />
+            </div>
+          </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">

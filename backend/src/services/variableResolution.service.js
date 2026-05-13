@@ -1,9 +1,12 @@
 import { prisma } from '../lib/prisma.js';
+import { parseCatalog } from '../utils/businessCatalog.js';
 
 /** Keys resolved from business / customer / clock — cannot be redefined as custom fields. */
 export const RESERVED_VARIABLE_KEYS = new Set([
   'business_name',
   'business_phone',
+  'business_owner_name',
+  'business_support_number',
   'owner_name',
   'support_number',
   'current_date',
@@ -57,6 +60,12 @@ function formatDisplayTime(d) {
   }
 }
 
+function ownerNameFromUser(owner) {
+  const email = owner?.email || '';
+  const at = email.indexOf('@');
+  return (at > 0 ? email.slice(0, at) : email).trim() || email;
+}
+
 function resolveBuiltin({
   key,
   business,
@@ -65,7 +74,10 @@ function resolveBuiltin({
   contactName,
   contactPhone,
   now,
+  clientProfile,
 }) {
+  const cp = clientProfile || {};
+
   switch (key) {
     case 'name':
     case 'customer_name':
@@ -74,16 +86,15 @@ function resolveBuiltin({
     case 'customer_phone':
       return String(customer?.phone || contactPhone || '').trim();
     case 'business_name':
-      return String(business?.name || '').trim();
+      return String(cp.business_name || business?.name || '').trim();
     case 'business_phone':
-      return String(process.env.BUSINESS_DISPLAY_PHONE || '').trim();
-    case 'owner_name': {
-      const email = owner?.email || '';
-      const at = email.indexOf('@');
-      return (at > 0 ? email.slice(0, at) : email).trim() || email;
-    }
+      return String(cp.business_phone || process.env.BUSINESS_DISPLAY_PHONE || '').trim();
+    case 'business_owner_name':
+    case 'owner_name':
+      return String(cp.business_owner_name || ownerNameFromUser(owner)).trim();
+    case 'business_support_number':
     case 'support_number':
-      return String(process.env.SUPPORT_PHONE || '').trim();
+      return String(cp.business_support_number || process.env.SUPPORT_PHONE || '').trim();
     case 'current_date':
       return formatDisplayDate(now);
     case 'current_time':
@@ -141,6 +152,9 @@ export async function resolvePersonalizedTemplateText(opts) {
       select: { email: true },
     }));
 
+  const catalog = parseCatalog(business?.config?.services);
+  const clientProfile = catalog.clientProfile;
+
   const definitionByKey = new Map(
     definitions.map((d) => [normalizeKey(d.key), d]),
   );
@@ -175,6 +189,7 @@ export async function resolvePersonalizedTemplateText(opts) {
         contactName,
         contactPhone,
         now,
+        clientProfile,
       });
     }
 

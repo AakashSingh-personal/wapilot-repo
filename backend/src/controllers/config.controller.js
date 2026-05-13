@@ -1,39 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-
-function parseCatalog(value) {
-  if (Array.isArray(value)) {
-    return { services: value, products: [], clientDetails: '' };
-  }
-  if (value && typeof value === 'object') {
-    return {
-      services: Array.isArray(value.services) ? value.services : [],
-      products: Array.isArray(value.products) ? value.products : [],
-      clientDetails: typeof value.clientDetails === 'string' ? value.clientDetails : '',
-    };
-  }
-  return { services: [], products: [], clientDetails: '' };
-}
-
-function mergeCatalog(existingValue, incoming) {
-  const current = parseCatalog(existingValue);
-  if (incoming.services != null) current.services = incoming.services;
-  if (incoming.products != null) current.products = incoming.products;
-  if (incoming.clientDetails !== undefined) {
-    current.clientDetails = incoming.clientDetails == null ? '' : String(incoming.clientDetails);
-  }
-  return current;
-}
-
-function serializeConfig(config) {
-  if (!config) return config;
-  const catalog = parseCatalog(config.services);
-  return {
-    ...config,
-    services: catalog.services,
-    products: catalog.products,
-    clientDetails: catalog.clientDetails,
-  };
-}
+import { mergeCatalog, serializeConfig } from '../utils/businessCatalog.js';
 
 export async function getConfig(req, res, next) {
   try {
@@ -52,8 +18,17 @@ export async function getConfig(req, res, next) {
 
 export async function updateConfig(req, res, next) {
   try {
-    const { businessName, services, products, clientDetails, workingHours, autoReplyEnabled, upiId, phoneNumberId } =
-      req.body || {};
+    const {
+      businessName,
+      services,
+      products,
+      clientDetails,
+      clientProfile,
+      workingHours,
+      autoReplyEnabled,
+      upiId,
+      phoneNumberId,
+    } = req.body || {};
 
     await prisma.$transaction(async (tx) => {
       const data = {};
@@ -73,12 +48,22 @@ export async function updateConfig(req, res, next) {
       }
 
       const cfgData = {};
-      if (services != null || products != null || clientDetails !== undefined) {
+      if (
+        services != null ||
+        products != null ||
+        clientDetails !== undefined ||
+        clientProfile !== undefined
+      ) {
         const existing = await tx.businessConfig.findUnique({
           where: { businessId: req.user.businessId },
           select: { services: true },
         });
-        cfgData.services = mergeCatalog(existing?.services, { services, products, clientDetails });
+        cfgData.services = mergeCatalog(existing?.services, {
+          services,
+          products,
+          clientDetails,
+          clientProfile,
+        });
       }
       if (workingHours != null) cfgData.workingHours = workingHours;
       if (autoReplyEnabled != null) cfgData.autoReplyEnabled = Boolean(autoReplyEnabled);
@@ -89,7 +74,12 @@ export async function updateConfig(req, res, next) {
           where: { businessId: req.user.businessId },
           create: {
             businessId: req.user.businessId,
-            services: mergeCatalog(null, { services, products, clientDetails }),
+            services: mergeCatalog(null, {
+              services,
+              products,
+              clientDetails,
+              clientProfile,
+            }),
             workingHours: typeof workingHours === 'string' ? workingHours : JSON.stringify({ slots: ['3 PM', '5 PM'] }),
             autoReplyEnabled: autoReplyEnabled ?? true,
             upiId: upiId ?? null,

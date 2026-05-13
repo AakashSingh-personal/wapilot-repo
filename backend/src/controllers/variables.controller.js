@@ -8,10 +8,30 @@ import {
 const KEY_REGEX = /^[a-z][a-z0-9_]{1,62}$/;
 
 const BUILTIN_CATALOG = [
-  { key: 'business_name', label: 'Business name', type: 'SYSTEM', readOnly: true },
-  { key: 'business_phone', label: 'Business phone (display)', type: 'SYSTEM', readOnly: true },
-  { key: 'owner_name', label: 'Owner name', type: 'SYSTEM', readOnly: true },
-  { key: 'support_number', label: 'Support number', type: 'SYSTEM', readOnly: true },
+  {
+    key: 'business_name',
+    label: 'Business display name (Settings → client profile)',
+    type: 'SYSTEM',
+    readOnly: true,
+  },
+  {
+    key: 'business_phone',
+    label: 'Business phone — customer-facing (Settings → client profile)',
+    type: 'SYSTEM',
+    readOnly: true,
+  },
+  {
+    key: 'business_owner_name',
+    label: 'Owner / public name (Settings → client profile)',
+    type: 'SYSTEM',
+    readOnly: true,
+  },
+  {
+    key: 'business_support_number',
+    label: 'Support number (Settings → client profile)',
+    type: 'SYSTEM',
+    readOnly: true,
+  },
   { key: 'current_date', label: 'Current date', type: 'SYSTEM', readOnly: true },
   { key: 'current_time', label: 'Current time', type: 'SYSTEM', readOnly: true },
   { key: 'customer_name', label: 'Customer name', type: 'SYSTEM', readOnly: true },
