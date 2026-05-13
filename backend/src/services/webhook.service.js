@@ -9,8 +9,8 @@ import {
 } from './bookingSlots.service.js';
 import { sendWhatsAppImageUrl, sendWhatsAppText } from './whatsapp.service.js';
 import { createRazorpayPaymentLink } from './razorpay.service.js';
-
-const MESSAGE_PREFIX = 'WA_MSG:';
+import { structuredContent, parseStructuredContent } from '../utils/waStructuredMessage.js';
+import { sessionAllowsFreeForm } from '../utils/conversationStatus.js';
 
 function aiKnowledgeFromConfig(configServices) {
   if (Array.isArray(configServices)) {
@@ -57,19 +57,6 @@ async function findOrCreateCustomer({ businessId, phone, name }) {
   return prisma.customer.create({
     data: { businessId, phone, name: name || null },
   });
-}
-
-function structuredContent(payload) {
-  return `${MESSAGE_PREFIX}${JSON.stringify(payload)}`;
-}
-
-function parseStructuredContent(raw) {
-  if (typeof raw !== 'string' || !raw.startsWith(MESSAGE_PREFIX)) return null;
-  try {
-    return JSON.parse(raw.slice(MESSAGE_PREFIX.length));
-  } catch {
-    return null;
-  }
 }
 
 function statusRank(status) {
@@ -206,6 +193,16 @@ async function resolveInboundContext({ phoneNumberId, fromWaId, contactName }) {
   return { business, customer, phone };
 }
 
+async function bumpInboundCustomerActivity(customerId) {
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: {
+      lastInboundCustomerMessageAt: new Date(),
+      inboxUnreadCount: { increment: 1 },
+    },
+  });
+}
+
 async function recentConversation(customerId, businessId, limit = 12) {
   const rows = await prisma.message.findMany({
     where: { customerId, businessId },
@@ -217,31 +214,48 @@ async function recentConversation(customerId, businessId, limit = 12) {
 }
 
 /**
- * Process one inbound WhatsApp text message.
+ * Plain-ish text from a stored USER message (for AI resume / non-text inbound).
  */
-export async function handleInboundText({
-  phoneNumberId,
-  fromWaId,
-  textBody,
-  contactName,
-}) {
-  const context = await resolveInboundContext({ phoneNumberId, fromWaId, contactName });
-  if (!context) return { ok: false, reason: 'unknown_business' };
-  const { business, customer, phone } = context;
-
-  await prisma.message.create({
-    data: {
-      customerId: customer.id,
-      businessId: business.id,
-      content: textBody,
-      type: 'USER',
-    },
-  });
-
-  const cfg = business.config;
-  if (!cfg?.autoReplyEnabled) {
-    return { ok: true, skipped: true };
+export function extractUserPlainText(content) {
+  if (typeof content !== 'string') return '';
+  const parsed = parseStructuredContent(content);
+  if (!parsed) return content.replace(/\s+/g, ' ').trim();
+  if (parsed.kind === 'text') return String(parsed.text || '').replace(/\s+/g, ' ').trim();
+  if (parsed.kind === 'image') return String(parsed.caption || '').trim() || '[Image]';
+  if (parsed.kind === 'audio') return '[Voice/audio message]';
+  if (parsed.kind === 'video') return String(parsed.caption || '').trim() || '[Video]';
+  if (parsed.kind === 'document') return String(parsed.filename || '').trim() || '[Document]';
+  if (parsed.kind === 'sticker') return '[Sticker]';
+  if (parsed.kind === 'location') {
+    return String(parsed.name || parsed.address || '').trim() || '[Location]';
   }
+  if (parsed.kind === 'contacts') return '[Contact card]';
+  if (parsed.kind === 'button') return String(parsed.text || parsed.payload || '').trim();
+  if (parsed.kind === 'interactive') {
+    return (
+      String(
+        parsed.buttonReply?.title || parsed.listReply?.title || parsed.nfmReply?.body || '',
+      ).trim() || '[Interactive reply]'
+    );
+  }
+  if (parsed.kind === 'reaction') return String(parsed.emoji || '').trim() || '[Reaction]';
+  return '[Message]';
+}
+
+/**
+ * Generate and send automated AI/bot reply for an inbound customer text (USER row must exist).
+ */
+export async function runAutoReplyForInboundText({ business, customer, phone, textBody }) {
+  const cfg = business.config;
+  if (!cfg?.autoReplyEnabled) return { ok: true, skipped: true };
+  if (!customer.aiEnabled || customer.aiOverride) {
+    return { ok: true, skipped: true, reason: 'human_override' };
+  }
+  if (!sessionAllowsFreeForm(customer.lastInboundCustomerMessageAt)) {
+    log('info', 'ai_reply_skipped_session_expired', { customerId: customer.id });
+    return { ok: true, skipped: true, reason: 'session_expired' };
+  }
+
   const knowledge = aiKnowledgeFromConfig(cfg.services);
 
   const slots = parseSlotsFromConfig(cfg.workingHours);
@@ -463,6 +477,47 @@ export async function handleInboundText({
   return { ok: true };
 }
 
+/**
+ * Process one inbound WhatsApp text message.
+ */
+export async function handleInboundText({
+  phoneNumberId,
+  fromWaId,
+  textBody,
+  contactName,
+}) {
+  const context = await resolveInboundContext({ phoneNumberId, fromWaId, contactName });
+  if (!context) return { ok: false, reason: 'unknown_business' };
+  const { business, customer, phone } = context;
+
+  await prisma.message.create({
+    data: {
+      customerId: customer.id,
+      businessId: business.id,
+      content: textBody,
+      type: 'USER',
+    },
+  });
+  await bumpInboundCustomerActivity(customer.id);
+
+  const cfg = business.config;
+  if (!cfg?.autoReplyEnabled) {
+    return { ok: true, skipped: true };
+  }
+
+  const freshCustomer = await prisma.customer.findUnique({ where: { id: customer.id } });
+  if (!freshCustomer?.aiEnabled || freshCustomer.aiOverride) {
+    return { ok: true, skipped: true, reason: 'human_override' };
+  }
+
+  return runAutoReplyForInboundText({
+    business,
+    customer: freshCustomer,
+    phone,
+    textBody,
+  });
+}
+
 export async function handleWhatsAppStatuses({ phoneNumberId, statuses = [] }) {
   if (!Array.isArray(statuses) || !statuses.length) return { ok: true, updated: 0 };
   const business = await findBusinessByPhoneNumberId(phoneNumberId);
@@ -532,6 +587,7 @@ export async function handleInboundImage({
       type: 'USER',
     },
   });
+  await bumpInboundCustomerActivity(customer.id);
 
   return { ok: true };
 }
@@ -610,6 +666,52 @@ export async function handleInboundNonText({
       type: 'USER',
     },
   });
+  await bumpInboundCustomerActivity(customer.id);
 
   return { ok: true };
+}
+
+/**
+ * After clearing aiOverride — optionally process latest USER message immediately (Back to AI → Last message).
+ */
+export async function resumeAiFromLastCustomerMessage({ customerId, businessId }) {
+  const business = await prisma.business.findFirst({
+    where: { id: businessId },
+    include: { config: true },
+  });
+  const customer = await prisma.customer.findFirst({
+    where: { id: customerId, businessId },
+  });
+  if (!business?.config?.autoReplyEnabled) {
+    return { ok: true, skipped: true, reason: 'auto_reply_off' };
+  }
+  if (!customer?.aiEnabled) {
+    return { ok: true, skipped: true, reason: 'ai_disabled' };
+  }
+  if (customer.aiOverride) {
+    return { ok: true, skipped: true, reason: 'still_overridden' };
+  }
+
+  const latestUser = await prisma.message.findFirst({
+    where: { customerId, businessId, type: 'USER' },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!latestUser) return { ok: true, skipped: true, reason: 'no_customer_message' };
+
+  const textBody = extractUserPlainText(latestUser.content);
+  if (!String(textBody || '').trim()) {
+    return { ok: true, skipped: true, reason: 'empty_text' };
+  }
+
+  if (!sessionAllowsFreeForm(customer.lastInboundCustomerMessageAt)) {
+    log('info', 'resume_ai_skipped_session', { customerId });
+    return { ok: true, skipped: true, reason: 'session_expired' };
+  }
+
+  return runAutoReplyForInboundText({
+    business,
+    customer,
+    phone: customer.phone,
+    textBody,
+  });
 }

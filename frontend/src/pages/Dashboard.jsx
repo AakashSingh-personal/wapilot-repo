@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api.js';
+import { previewText } from '../utils/whatsappMessagePreview.js';
+import { SessionBadge, MessageBadge } from '../components/ChatStatusBadges.jsx';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -89,7 +91,10 @@ export default function Dashboard() {
             <li key={t.id}>
               <Link
                 to={`/conversations?customer=${encodeURIComponent(t.id)}`}
-                className="flex gap-3 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 -mx-2 px-2 rounded-xl transition-colors"
+                className={[
+                  'flex gap-3 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 -mx-2 px-2 rounded-xl transition-colors',
+                  t.inboxUnreadCount > 0 ? 'border-l-4 border-l-sky-500 pl-1.5' : '',
+                ].join(' ')}
               >
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-slate-900 dark:text-white truncate">
@@ -102,19 +107,29 @@ export default function Dashboard() {
                       : t.lastMessage?.type === 'STAFF'
                         ? 'You: '
                         : 'Bot: '}
-                    {(t.lastMessage?.content || '').replace(/\s+/g, ' ').slice(0, 80)}
-                    {(t.lastMessage?.content?.length || 0) > 80 ? '…' : ''}
+                    {previewText(t.lastMessage?.content || '', 80)}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    <SessionBadge status={t.sessionStatus} />
+                    <MessageBadge status={t.messageStatus} />
                   </div>
                 </div>
-                <div className="text-xs text-slate-400 shrink-0 pt-1">
-                  {t.lastMessage?.createdAt
-                    ? new Date(t.lastMessage.createdAt).toLocaleString(undefined, {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                      })
-                    : ''}
+                <div className="flex flex-col items-end gap-1 shrink-0 pt-0.5">
+                  <div className="text-xs text-slate-400">
+                    {t.lastMessage?.createdAt
+                      ? new Date(t.lastMessage.createdAt).toLocaleString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })
+                      : ''}
+                  </div>
+                  {t.inboxUnreadCount > 0 ? (
+                    <span className="inline-flex min-w-[1.25rem] justify-center rounded-full bg-sky-600 text-white text-[10px] font-bold px-1.5 py-0.5">
+                      {t.inboxUnreadCount > 99 ? '99+' : t.inboxUnreadCount}
+                    </span>
+                  ) : null}
                 </div>
               </Link>
             </li>

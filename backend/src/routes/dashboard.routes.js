@@ -8,6 +8,10 @@ router.use(authMiddleware);
 
 router.get('/stats', dashboardController.stats);
 router.get('/conversations', dashboardController.listConversations);
+router.patch(
+  '/conversations/:customerId/ai-control',
+  dashboardController.patchConversationAiControl,
+);
 router.get('/customers', dashboardController.listCustomers);
 router.get('/leads', dashboardController.listLeads);
 router.get('/messages/:customerId', dashboardController.messagesForCustomer);

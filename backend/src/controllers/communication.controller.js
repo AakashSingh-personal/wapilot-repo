@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
+import { structuredContent } from '../utils/waStructuredMessage.js';
 import { createWhatsAppTemplate, listWhatsAppTemplates } from '../services/whatsapp.service.js';
 import { uploadBase64ToSupabase } from '../services/supabase.service.js';
 import {
@@ -662,7 +663,7 @@ export async function updateTemplateStatus(req, res, next) {
 
 export async function sendTemplateCommunication(req, res, next) {
   try {
-    const { templateId, contactId, contactIds = [], variables = {} } = req.body || {};
+    const { templateId, contactId, contactIds = [], customerIds = [], variables = {} } = req.body || {};
     if (!templateId) return res.status(400).json({ error: 'templateId is required' });
 
     const template = await prisma.template.findFirst({
@@ -673,16 +674,42 @@ export async function sendTemplateCommunication(req, res, next) {
       return res.status(400).json({ error: 'Template is marked as NOT_WORKING' });
     }
 
-    const ids = [...new Set([contactId, ...contactIds].filter(Boolean))];
-    if (!ids.length) {
-      return res.status(400).json({ error: 'Provide at least one contactId' });
-    }
+    const contactIdSet = [...new Set([contactId, ...contactIds].filter(Boolean))];
+    const customerIdSet = [...new Set([...(customerIds || [])].filter(Boolean))];
 
-    const contacts = await prisma.contact.findMany({
-      where: { businessId: req.user.businessId, id: { in: ids } },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!contacts.length) return res.status(404).json({ error: 'No contacts found' });
+    const [contacts, customers] = await Promise.all([
+      contactIdSet.length
+        ? prisma.contact.findMany({
+            where: { businessId: req.user.businessId, id: { in: contactIdSet } },
+            orderBy: { createdAt: 'asc' },
+          })
+        : [],
+      customerIdSet.length
+        ? prisma.customer.findMany({
+            where: { businessId: req.user.businessId, id: { in: customerIdSet } },
+            orderBy: { createdAt: 'asc' },
+          })
+        : [],
+    ]);
+
+    const targets = [
+      ...contacts.map((c) => ({
+        phone: normalizePhone(c.phone),
+        name: c.name,
+        walletContactId: c.id,
+        customerId: null,
+      })),
+      ...customers.map((c) => ({
+        phone: normalizePhone(c.phone),
+        name: c.name,
+        walletContactId: null,
+        customerId: c.id,
+      })),
+    ];
+
+    if (!targets.length) {
+      return res.status(400).json({ error: 'Provide at least one contactId or customerId' });
+    }
 
     const business = await prisma.business.findUnique({ where: { id: req.user.businessId } });
     const phoneNumberId = business?.phoneNumberId || process.env.PHONE_NUMBER_ID;
@@ -697,9 +724,9 @@ export async function sendTemplateCommunication(req, res, next) {
         businessId: req.user.businessId,
         templateId: template.id,
         status: 'FAILED',
-        totalContacts: contacts.length,
+        totalContacts: targets.length,
         sentCount: 0,
-        failedCount: contacts.length,
+        failedCount: targets.length,
         totalCharged: '0',
         messageCost: MESSAGE_COST_INR.toFixed(2),
       },
@@ -710,27 +737,33 @@ export async function sendTemplateCommunication(req, res, next) {
     let totalCharged = 0;
     const blocked = [];
 
-    for (const contact of contacts) {
+    for (const target of targets) {
       const walletBefore = await prisma.wallet.findUnique({
         where: { businessId: req.user.businessId },
       });
       if (Number(walletBefore?.balance || 0) < MESSAGE_COST_INR) {
-        blocked.push({ contactId: contact.id, phone: contact.phone, reason: 'INSUFFICIENT_BALANCE' });
+        blocked.push({
+          contactId: target.walletContactId,
+          customerId: target.customerId,
+          phone: target.phone,
+          reason: 'INSUFFICIENT_BALANCE',
+        });
         failedCount += 1;
         continue;
       }
 
       const content = fillTemplate(template.content, {
         ...variables,
-        name: contact.name || variables.name || '',
-        phone: contact.phone,
+        name: target.name || variables.name || '',
+        phone: target.phone,
       });
       try {
-        await sendWhatsAppText({
+        const sendRes = await sendWhatsAppText({
           phoneNumberId,
-          toPhoneE164: contact.phone,
+          toPhoneE164: target.phone,
           body: content,
         });
+        const waMessageId = sendRes?.messages?.[0]?.id;
         const charged = await prisma.$transaction(async (tx) => {
           const wallet = await getOrCreateWallet(tx, req.user.businessId);
           const balance = Number(wallet.balance);
@@ -744,33 +777,54 @@ export async function sendTemplateCommunication(req, res, next) {
             data: {
               businessId: req.user.businessId,
               campaignId: campaign.id,
-              contactId: contact.id,
+              contactId: target.walletContactId,
               amount: MESSAGE_COST_INR.toFixed(2),
               type: 'DEBIT',
-              description: `Message charge for ${contact.phone}`,
+              description: `Message charge for ${target.phone}`,
             },
           });
           return true;
         });
         if (!charged) {
-          blocked.push({ contactId: contact.id, phone: contact.phone, reason: 'INSUFFICIENT_BALANCE_POST_SEND' });
+          blocked.push({
+            contactId: target.walletContactId,
+            customerId: target.customerId,
+            phone: target.phone,
+            reason: 'INSUFFICIENT_BALANCE_POST_SEND',
+          });
           failedCount += 1;
           continue;
         }
+        const customerRecord = await prisma.customer.upsert({
+          where: { businessId_phone: { businessId: req.user.businessId, phone: target.phone } },
+          update: { name: target.name || undefined },
+          create: {
+            businessId: req.user.businessId,
+            phone: target.phone,
+            name: target.name,
+          },
+        });
         await prisma.message.create({
           data: {
-            customerId: (await prisma.customer.upsert({
-              where: { businessId_phone: { businessId: req.user.businessId, phone: contact.phone } },
-              update: { name: contact.name || undefined },
-              create: {
-                businessId: req.user.businessId,
-                phone: contact.phone,
-                name: contact.name,
-              },
-            })).id,
+            customerId: customerRecord.id,
             businessId: req.user.businessId,
-            content,
+            content: structuredContent({
+              kind: 'text',
+              text: content,
+              direction: 'outbound',
+              status: 'sent',
+              waMessageId: waMessageId || undefined,
+              source: 'template_campaign',
+            }),
             type: 'STAFF',
+          },
+        });
+        await prisma.customer.update({
+          where: { id: customerRecord.id },
+          data: {
+            aiOverride: true,
+            aiOverrideByUserId: req.user.userId,
+            aiOverrideAt: new Date(),
           },
         });
         sentCount += 1;
@@ -780,7 +834,8 @@ export async function sendTemplateCommunication(req, res, next) {
       }
     }
 
-    const finalStatus = sentCount === contacts.length ? 'COMPLETED' : sentCount > 0 ? 'PARTIAL' : 'FAILED';
+    const finalStatus =
+      sentCount === targets.length ? 'COMPLETED' : sentCount > 0 ? 'PARTIAL' : 'FAILED';
     const updatedCampaign = await prisma.communicationCampaign.update({
       where: { id: campaign.id },
       data: {

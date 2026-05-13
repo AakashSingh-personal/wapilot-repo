@@ -1,57 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../services/api.js';
+import { parseMessageContent, previewText } from '../utils/whatsappMessagePreview.js';
+import { SessionBadge, MessageBadge } from '../components/ChatStatusBadges.jsx';
 
 const POLL_MS = 4000;
-const MESSAGE_PREFIX = 'WA_MSG:';
-const LEGACY_MEDIA_PREFIX = 'WA_MEDIA:';
-
-function parseMessageContent(rawContent) {
-  if (typeof rawContent !== 'string') {
-    return { kind: 'text', text: '' };
-  }
-  if (rawContent.startsWith(LEGACY_MEDIA_PREFIX)) {
-    try {
-      const parsed = JSON.parse(rawContent.slice(LEGACY_MEDIA_PREFIX.length));
-      if (parsed?.kind) return parsed;
-    } catch {
-      // Continue to other parsing paths.
-    }
-  }
-  if (!rawContent.startsWith(MESSAGE_PREFIX)) {
-    return { kind: 'text', text: rawContent };
-  }
-  try {
-    const parsed = JSON.parse(rawContent.slice(MESSAGE_PREFIX.length));
-    if (parsed?.kind) return parsed;
-  } catch {
-    // Fallback to plain text if older/bad payload is present.
-  }
-  return { kind: 'text', text: rawContent };
-}
-
-function previewText(content, max = 72) {
-  const parsed = parseMessageContent(content);
-  if (parsed.kind === 'image') {
-    return parsed.caption ? `Image: ${parsed.caption}` : 'Image';
-  }
-  if (parsed.kind === 'audio') return 'Audio';
-  if (parsed.kind === 'video') return parsed.caption ? `Video: ${parsed.caption}` : 'Video';
-  if (parsed.kind === 'document') return parsed.filename ? `Document: ${parsed.filename}` : 'Document';
-  if (parsed.kind === 'sticker') return 'Sticker';
-  if (parsed.kind === 'location') return 'Location';
-  if (parsed.kind === 'contacts') return 'Contact card';
-  if (parsed.kind === 'button') return parsed.text ? `Button: ${parsed.text}` : 'Button reply';
-  if (parsed.kind === 'interactive') return 'Interactive reply';
-  if (parsed.kind === 'reaction') return parsed.emoji ? `Reaction: ${parsed.emoji}` : 'Reaction';
-  if (typeof parsed.raw === 'string') {
-    const oneLineRaw = parsed.raw.replace(/\s+/g, ' ').trim();
-    return oneLineRaw.length <= max ? oneLineRaw : `${oneLineRaw.slice(0, max)}…`;
-  }
-  const oneLine = (parsed.text || '').replace(/\s+/g, ' ').trim();
-  if (oneLine.length <= max) return oneLine;
-  return `${oneLine.slice(0, max)}…`;
-}
 
 function formatShortTime(iso) {
   if (!iso) return '';
@@ -66,10 +19,19 @@ function formatShortTime(iso) {
     : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function buildConversationQuery(filters) {
+  const { session = [], message = [] } = filters || {};
+  const p = new URLSearchParams();
+  if (session.length) p.set('sessionStatus', session.join(','));
+  if (message.length) p.set('messageStatus', message.join(','));
+  const qs = p.toString();
+  return qs ? `?${qs}` : '';
+}
+
 function bubbleMeta(type) {
   if (type === 'USER') return { align: 'left', label: 'Customer', bubble: 'incoming' };
-  if (type === 'STAFF') return { align: 'right', label: 'You (web)', bubble: 'staff' };
-  return { align: 'right', label: 'Auto-reply', bubble: 'bot' };
+  if (type === 'STAFF') return { align: 'right', label: 'Agent', bubble: 'staff' };
+  return { align: 'right', label: 'AI', bubble: 'bot' };
 }
 
 function statusTick(status) {
@@ -147,6 +109,22 @@ export default function Conversations() {
   const [mediaUrls, setMediaUrls] = useState({});
   const [catalogItems, setCatalogItems] = useState([]);
   const [showCatalog, setShowCatalog] = useState(false);
+  const [filterSession, setFilterSession] = useState({
+    active: false,
+    expiring: false,
+    expired: false,
+  });
+  const [filterMessage, setFilterMessage] = useState({
+    sent: false,
+    unread: false,
+    read: false,
+    replied: false,
+  });
+  const [templates, setTemplates] = useState([]);
+  const [aiNotice, setAiNotice] = useState('');
+  const [showResumeAiModal, setShowResumeAiModal] = useState(false);
+  const [resumeAiMode, setResumeAiMode] = useState('NEW_MESSAGES_ONLY');
+  const [loadingAiControl, setLoadingAiControl] = useState(false);
 
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -168,9 +146,19 @@ export default function Conversations() {
     );
   }, [threads, query]);
 
+  const conversationQuerySuffix = useMemo(() => {
+    const session = Object.entries(filterSession)
+      .filter(([, on]) => on)
+      .map(([k]) => k);
+    const message = Object.entries(filterMessage)
+      .filter(([, on]) => on)
+      .map(([k]) => k);
+    return buildConversationQuery({ session, message });
+  }, [filterSession, filterMessage]);
+
   const loadThreads = useCallback(async () => {
     try {
-      const { data } = await api.get('/dashboard/conversations');
+      const { data } = await api.get(`/dashboard/conversations${conversationQuerySuffix}`);
       setThreads(data);
       setError('');
       return data;
@@ -178,13 +166,14 @@ export default function Conversations() {
       setError(e.response?.data?.error || 'Failed to load inbox');
       return [];
     }
-  }, []);
+  }, [conversationQuerySuffix]);
 
   const loadMessages = useCallback(async (customerId) => {
     if (!customerId) return;
     try {
       const { data } = await api.get(`/dashboard/messages/${customerId}`);
-      setMessages(data);
+      const list = Array.isArray(data) ? data : data?.messages ?? [];
+      setMessages(list);
     } catch (e) {
       setError(e.response?.data?.error || 'Failed to load messages');
     }
@@ -209,6 +198,22 @@ export default function Conversations() {
       cancelled = true;
     };
   }, [loadThreads, paramCustomerId]);
+
+  useEffect(() => {
+    if (!selectedId || !threads.length) return;
+    if (!threads.some((t) => t.id === selectedId)) {
+      const fallback =
+        paramCustomerId && threads.some((t) => t.id === paramCustomerId)
+          ? paramCustomerId
+          : threads[0]?.id ?? null;
+      setSelectedId(fallback);
+      if (fallback) {
+        const next = new URLSearchParams(searchParams);
+        next.set('customer', fallback);
+        setSearchParams(next, { replace: true });
+      }
+    }
+  }, [threads, selectedId, paramCustomerId, searchParams, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,7 +241,24 @@ export default function Conversations() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get('/templates');
+        if (cancelled) return;
+        setTemplates(Array.isArray(data?.templates) ? data.templates : []);
+      } catch {
+        if (!cancelled) setTemplates([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedId) return;
+    setAiNotice('');
     loadMessages(selectedId);
   }, [selectedId, loadMessages]);
 
@@ -321,7 +343,10 @@ export default function Conversations() {
       setLoadingSend(false);
       await Promise.allSettled([loadMessages(selectedId), loadThreads()]);
     } catch (e) {
-      setError(e.response?.data?.error || 'Send failed — check WhatsApp token / phone number id');
+      const code = e.response?.data?.code;
+      const msg = e.response?.data?.error || 'Send failed — check WhatsApp token / phone number id';
+      setError(code === 'SESSION_EXPIRED' ? `${msg} Reloading inbox…` : msg);
+      if (code === 'SESSION_EXPIRED') await loadThreads();
     }
     setLoadingSend(false);
   }
@@ -340,9 +365,67 @@ export default function Conversations() {
       setLoadingSend(false);
       await Promise.allSettled([loadMessages(selectedId), loadThreads()]);
     } catch (e) {
-      setError(e.response?.data?.error || 'Catalog send failed');
+      const code = e.response?.data?.code;
+      const msg = e.response?.data?.error || 'Catalog send failed';
+      setError(code === 'SESSION_EXPIRED' ? `${msg} Reloading inbox…` : msg);
+      if (code === 'SESSION_EXPIRED') await loadThreads();
     }
     setLoadingSend(false);
+  }
+
+  async function sendTemplate(templateId) {
+    if (!selectedId || !templateId) return;
+    setLoadingSend(true);
+    setError('');
+    try {
+      await api.post('/communications/send', {
+        templateId,
+        customerIds: [selectedId],
+      });
+      setShowCatalog(false);
+      await Promise.allSettled([loadMessages(selectedId), loadThreads()]);
+    } catch (e) {
+      setError(
+        e.response?.data?.error ||
+          'Template send failed — check wallet balance and WhatsApp configuration.',
+      );
+    }
+    setLoadingSend(false);
+  }
+
+  const sessionExpired = selected?.sessionStatus === 'expired';
+  const sessionExpiring = selected?.sessionStatus === 'expiring';
+  const workingTemplates = templates.filter((x) => x.status === 'WORKING');
+
+  const aiControl = selected?.aiControl ?? null;
+  const humanOverrideActive = Boolean(aiControl?.aiOverride);
+
+  async function patchAiControl(body) {
+    if (!selectedId) return;
+    setLoadingAiControl(true);
+    setAiNotice('');
+    setError('');
+    try {
+      const { data } = await api.patch(`/dashboard/conversations/${selectedId}/ai-control`, body);
+      setAiNotice(data?.notice || '');
+      await Promise.all([loadThreads(), loadMessages(selectedId)]);
+      setShowResumeAiModal(false);
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not update AI mode');
+    }
+    setLoadingAiControl(false);
+  }
+
+  function openResumeAiModal() {
+    setResumeAiMode('NEW_MESSAGES_ONLY');
+    setShowResumeAiModal(true);
+  }
+
+  async function confirmResumeAi() {
+    await patchAiControl({
+      action: 'resume',
+      resumeMode: resumeAiMode,
+    });
   }
 
   return (
@@ -359,6 +442,11 @@ export default function Conversations() {
           {error}
         </div>
       )}
+      {aiNotice && (
+        <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/35 text-emerald-800 dark:text-emerald-200 text-sm px-3 py-2">
+          {aiNotice}
+        </div>
+      )}
 
       <div className="grid md:grid-cols-5 gap-4 h-[min(720px,calc(100vh-12rem))]">
         <div className="md:col-span-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm flex flex-col">
@@ -371,6 +459,58 @@ export default function Conversations() {
               onChange={(e) => setQuery(e.target.value)}
               className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm"
             />
+            <details className="text-xs text-slate-600 dark:text-slate-400">
+              <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-300 select-none">
+                Filters
+              </summary>
+              <div className="mt-2 space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                <div className="font-semibold text-[11px] uppercase tracking-wide text-slate-500">
+                  Session status
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {[
+                    ['active', 'Active'],
+                    ['expiring', 'Expiring'],
+                    ['expired', 'Expired'],
+                  ].map(([key, label]) => (
+                    <label key={key} className="inline-flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={filterSession[key]}
+                        onChange={(e) =>
+                          setFilterSession((f) => ({ ...f, [key]: e.target.checked }))
+                        }
+                        className="rounded border-slate-300 dark:border-slate-600"
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="font-semibold text-[11px] uppercase tracking-wide text-slate-500 pt-1">
+                  Message status
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {[
+                    ['sent', 'Sent'],
+                    ['unread', 'Unread'],
+                    ['read', 'Read'],
+                    ['replied', 'Replied'],
+                  ].map(([key, label]) => (
+                    <label key={key} className="inline-flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={filterMessage[key]}
+                        onChange={(e) =>
+                          setFilterMessage((f) => ({ ...f, [key]: e.target.checked }))
+                        }
+                        className="rounded border-slate-300 dark:border-slate-600"
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </details>
           </div>
           <div className="flex-1 overflow-y-auto">
             {loadingThreads && !threads.length ? (
@@ -384,26 +524,47 @@ export default function Conversations() {
                   className={[
                     'w-full text-left px-4 py-3 text-sm border-b border-slate-50 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors',
                     selectedId === t.id ? 'bg-brand-50 dark:bg-brand-900/20' : '',
+                    t.inboxUnreadCount > 0 ? 'border-l-4 border-l-sky-500 pl-3' : '',
                   ].join(' ')}
                 >
                   <div className="flex justify-between gap-2 items-start">
-                    <div className="font-medium text-slate-900 dark:text-white truncate">
+                    <div className="font-medium text-slate-900 dark:text-white truncate min-w-0">
                       {t.name || 'Unknown'}
                     </div>
-                    <div className="text-[11px] text-slate-400 shrink-0">
-                      {formatShortTime(t.lastMessage?.createdAt)}
+                    <div className="flex flex-col items-end gap-0.5 shrink-0">
+                      <div className="text-[11px] text-slate-400">
+                        {formatShortTime(t.lastMessage?.createdAt)}
+                      </div>
+                      {t.inboxUnreadCount > 0 ? (
+                        <span className="inline-flex min-w-[1.25rem] justify-center rounded-full bg-sky-600 text-white text-[10px] font-bold px-1.5 py-0.5">
+                          {t.inboxUnreadCount > 99 ? '99+' : t.inboxUnreadCount}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="text-xs text-slate-500 font-mono truncate">{t.phone}</div>
                   {t.lastMessage && (
                     <div className="text-xs text-slate-500 mt-1 truncate">
-                      {t.lastMessage.type === 'USER' ? '' : t.lastMessage.type === 'STAFF' ? 'You: ' : 'Bot: '}
+                      {t.lastMessage.type === 'USER'
+                        ? ''
+                        : t.lastMessage.type === 'STAFF'
+                          ? 'Agent: '
+                          : 'AI: '}
                       {previewText(t.lastMessage.content)}
                     </div>
                   )}
                   {!t.lastMessage && (
                     <div className="text-xs text-slate-400 mt-1 italic">No messages yet</div>
                   )}
+                  <div className="flex flex-wrap gap-1 mt-2 items-center">
+                    <SessionBadge status={t.sessionStatus} />
+                    <MessageBadge status={t.messageStatus} />
+                    {t.aiControl?.aiOverride ? (
+                      <span className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">
+                        AI paused
+                      </span>
+                    ) : null}
+                  </div>
                 </button>
               ))
             )}
@@ -415,18 +576,73 @@ export default function Conversations() {
           </div>
         </div>
 
-        <div className="md:col-span-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex flex-col min-h-[420px]">
-          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex justify-between items-start gap-2">
-            <div className="min-w-0">
+        <div className="md:col-span-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex flex-col min-h-[420px] relative">
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex justify-between items-start gap-3">
+            <div className="min-w-0 space-y-1 flex-1">
               <div className="font-semibold text-slate-900 dark:text-white truncate">
                 {selected?.name || 'Select a chat'}
               </div>
               <div className="text-xs text-slate-500 font-mono truncate">{selected?.phone}</div>
+              {selected ? (
+                <div className="flex flex-wrap gap-1 pt-0.5 items-center">
+                  <SessionBadge status={selected.sessionStatus} />
+                  <MessageBadge status={selected.messageStatus} />
+                  <span
+                    className={[
+                      'inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+                      humanOverrideActive
+                        ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100'
+                        : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/45 dark:text-emerald-200',
+                    ].join(' ')}
+                  >
+                    {humanOverrideActive ? 'AI paused' : 'AI active'}
+                  </span>
+                  {!humanOverrideActive ? (
+                    <button
+                      type="button"
+                      disabled={loadingAiControl || !selectedId}
+                      onClick={() => patchAiControl({ action: 'override' })}
+                      className="rounded-full border border-slate-300 dark:border-slate-600 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      Override AI
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={loadingAiControl || !selectedId}
+                      onClick={openResumeAiModal}
+                      className="rounded-full border border-emerald-600 text-emerald-700 dark:text-emerald-400 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-50"
+                    >
+                      Back to AI
+                    </button>
+                  )}
+                </div>
+              ) : null}
+              {sessionExpiring && selected ? (
+                <div className="text-xs font-medium text-amber-700 dark:text-amber-300 pt-1">
+                  Session expiring soon — reply before the 24-hour window closes.
+                </div>
+              ) : null}
+              {sessionExpired && selected ? (
+                <div className="text-xs font-medium text-red-700 dark:text-red-300 pt-1">
+                  24-hour session expired. Send template message to reopen chat.
+                </div>
+              ) : null}
             </div>
-            <span className="text-[10px] uppercase tracking-wide text-slate-400 shrink-0 hidden sm:block">
-              Live sync ~{POLL_MS / 1000}s
-            </span>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400 hidden sm:block">
+                Live sync ~{POLL_MS / 1000}s
+              </span>
+            </div>
           </div>
+          {humanOverrideActive && selected ? (
+            <div className="px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-100 dark:border-amber-900/40 text-xs text-amber-950 dark:text-amber-100">
+              <div className="font-semibold">Human agent is handling this conversation.</div>
+              {aiControl?.pausedByEmail ? (
+                <div className="mt-0.5 opacity-90">AI paused by {aiControl.pausedByEmail}</div>
+              ) : null}
+            </div>
+          ) : null}
           <div
             ref={messagesContainerRef}
             className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/60 dark:bg-slate-950/40"
@@ -639,7 +855,7 @@ export default function Conversations() {
           <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex gap-2">
             <button
               type="button"
-              disabled={!selected || loadingSend}
+              disabled={!selected || loadingSend || sessionExpired}
               onClick={() => setShowCatalog((v) => !v)}
               className="self-end rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-semibold disabled:opacity-50 shrink-0"
             >
@@ -647,10 +863,16 @@ export default function Conversations() {
             </button>
             <textarea
               rows={2}
-              className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm resize-none"
-              placeholder={selected ? 'Type a message — sends on WhatsApp…' : 'Select a chat first'}
+              className="flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm resize-none disabled:opacity-60"
+              placeholder={
+                sessionExpired && selected
+                  ? 'Session expired — use template send below'
+                  : selected
+                    ? 'Type a message — sends on WhatsApp…'
+                    : 'Select a chat first'
+              }
               value={draft}
-              disabled={!selected}
+              disabled={!selected || sessionExpired}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -661,13 +883,38 @@ export default function Conversations() {
             />
             <button
               type="button"
-              disabled={loadingSend || !selected}
+              disabled={loadingSend || !selected || sessionExpired}
               onClick={send}
               className="self-end rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-4 py-2 text-sm font-semibold disabled:opacity-50 shrink-0"
             >
               {loadingSend ? '…' : 'Send'}
             </button>
           </div>
+          {sessionExpired && selected && (
+            <div className="px-3 pb-2 space-y-2">
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Template / campaign send (wallet charged per message)
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-2 max-h-40 overflow-y-auto space-y-1.5">
+                {workingTemplates.map((tmpl) => (
+                  <button
+                    key={tmpl.id}
+                    type="button"
+                    disabled={loadingSend}
+                    onClick={() => sendTemplate(tmpl.id)}
+                    className="w-full text-left rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2 py-2 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {tmpl.name}
+                  </button>
+                ))}
+                {!workingTemplates.length && (
+                  <div className="text-xs text-slate-500 px-2 py-2">
+                    No working templates — create one under Communications. Sends use your wallet balance.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {showCatalog && (
             <div className="px-3 pb-3">
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-2 max-h-44 overflow-y-auto space-y-2">
@@ -688,6 +935,71 @@ export default function Conversations() {
                 {!catalogItems.length && (
                   <div className="text-xs text-slate-500 px-2 py-1">No catalog images found in Settings.</div>
                 )}
+              </div>
+            </div>
+          )}
+          {showResumeAiModal && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-4 rounded-2xl">
+              <div
+                role="dialog"
+                aria-modal="true"
+                className="max-w-md w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-4 space-y-4"
+              >
+                <div className="font-semibold text-slate-900 dark:text-white">Resume AI</div>
+                <p className="text-sm text-slate-600 dark:text-slate-400">Resume AI from:</p>
+                <div className="space-y-3 text-sm">
+                  <label className="flex gap-2 cursor-pointer items-start">
+                    <input
+                      type="radio"
+                      name="resumeAiMode"
+                      checked={resumeAiMode === 'NEW_MESSAGES_ONLY'}
+                      onChange={() => setResumeAiMode('NEW_MESSAGES_ONLY')}
+                      className="mt-1 rounded-full border-slate-300"
+                    />
+                    <span>
+                      <span className="font-medium text-slate-900 dark:text-white">
+                        New incoming messages only
+                      </span>
+                      <span className="block text-xs text-slate-500 mt-0.5">
+                        Recommended — AI waits for the customer&apos;s next message before replying.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex gap-2 cursor-pointer items-start">
+                    <input
+                      type="radio"
+                      name="resumeAiMode"
+                      checked={resumeAiMode === 'LAST_CUSTOMER_MESSAGE'}
+                      onChange={() => setResumeAiMode('LAST_CUSTOMER_MESSAGE')}
+                      className="mt-1 rounded-full border-slate-300"
+                    />
+                    <span>
+                      <span className="font-medium text-slate-900 dark:text-white">
+                        Last customer message
+                      </span>
+                      <span className="block text-xs text-slate-500 mt-0.5">
+                        AI replies immediately using the latest customer message (requires an active WhatsApp session).
+                      </span>
+                    </span>
+                  </label>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowResumeAiModal(false)}
+                    className="rounded-xl border border-slate-200 dark:border-slate-600 px-3 py-2 text-xs font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loadingAiControl}
+                    onClick={confirmResumeAi}
+                    className="rounded-xl bg-emerald-600 text-white px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                  >
+                    Resume AI
+                  </button>
+                </div>
               </div>
             </div>
           )}

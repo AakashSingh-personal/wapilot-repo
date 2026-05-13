@@ -73,6 +73,11 @@ enum WalletTxnType {
   DEBIT
 }
 
+enum AiResumeMode {
+  NEW_MESSAGES_ONLY
+  LAST_CUSTOMER_MESSAGE
+}
+
 model Business {
   id              String   @id @default(uuid()) @db.Uuid
   name            String
@@ -104,20 +109,31 @@ model User {
   role       UserRole @default(STAFF)
   createdAt  DateTime @default(now())
 
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business              Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  aiPausedConversations Customer[] @relation("CustomerAiOverrideBy")
 
   @@index([businessId])
 }
 
 model Customer {
-  id                           String   @id @default(uuid()) @db.Uuid
+  id                           String    @id @default(uuid()) @db.Uuid
   phone                        String
   name                         String?
-  businessId                   String   @db.Uuid
-  bookingSlotSelectionPending  Boolean  @default(false)
-  createdAt                    DateTime @default(now())
+  businessId                   String    @db.Uuid
+  bookingSlotSelectionPending  Boolean   @default(false)
+  /** Last inbound message from the customer (USER). Drives 24h session + reopen. */
+  lastInboundCustomerMessageAt DateTime?
+  /** Increments on each inbound USER message; cleared when staff opens the thread. */
+  inboxUnreadCount             Int       @default(0)
+  aiEnabled                    Boolean        @default(true)
+  aiOverride                   Boolean        @default(false)
+  aiOverrideByUserId           String?        @db.Uuid
+  aiOverrideAt                 DateTime?
+  aiResumeMode                 AiResumeMode?
+  createdAt                    DateTime       @default(now())
 
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  aiOverrideBy   User?    @relation("CustomerAiOverrideBy", fields: [aiOverrideByUserId], references: [id], onDelete: SetNull)
   leads    Lead[]
   messages Message[]
   bookings Booking[]
