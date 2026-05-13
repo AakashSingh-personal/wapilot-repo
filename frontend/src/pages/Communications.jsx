@@ -239,11 +239,55 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     }
   }
 
-  async function ensureWalletLoaded() {
-    if (wallet) return;
+  async function refreshWallet() {
     const { data } = await api.get('/wallet');
     setWallet(data.wallet);
     setMessageCost(Number(data.messageCost || 2));
+  }
+
+  async function ensureWalletLoaded() {
+    await refreshWallet();
+  }
+
+  /** Refetch wallet, contacts, templates, contact book, and (when relevant) wallet transactions. */
+  async function loadAll() {
+    await refreshWallet();
+    try {
+      const { data: contactsData } = await api.get('/contacts');
+      const list = asArray(contactsData);
+      setContacts(list);
+      setSelectedContactId((prev) => {
+        if (prev && list.some((c) => c.id === prev)) return prev;
+        return list[0]?.id || '';
+      });
+    } catch {
+      // Keep existing contacts list if refresh fails.
+    }
+    try {
+      const { data: templatesRes } = await api.get('/templates');
+      const templatesData = asArray(templatesRes?.templates || templatesRes);
+      setTemplates(templatesData);
+      if (templatesRes?.metaSyncError) {
+        setError(`Meta sync issue: ${templatesRes.metaSyncError}`, 'TEMPLATES');
+      }
+      setSelectedTemplateId((prev) => {
+        if (prev && templatesData.some((t) => t.id === prev)) return prev;
+        return templatesData[0]?.id || '';
+      });
+    } catch {
+      // Keep existing templates if refresh fails.
+    }
+    try {
+      await loadContactBook();
+    } catch {
+      // Contact book is optional for send/upload flows.
+    }
+    await loadWalletTransactions({
+      filter: txnFilter,
+      offset: 0,
+      append: false,
+      onlyTopups: txnOnlyTopups,
+    }).catch(() => {});
   }
 
   async function ensureContactsLoaded() {
@@ -395,8 +439,14 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     try {
       const { data } = await api.post('/contacts/upload', { csvText });
       setCsvText('');
-      await loadAll();
-      setInfo(`Uploaded contacts: ${data.inserted}`);
+      setError('');
+      const n = Number(data?.inserted ?? 0);
+      setInfo(
+        n > 0
+          ? `Uploaded contacts: ${n} new row(s).`
+          : 'Upload completed — no new rows (numbers may already exist in your contact book).',
+      );
+      await loadAll().catch(() => {});
     } catch (e) {
       setError(e.response?.data?.error || 'Upload failed');
     } finally {
@@ -522,10 +572,11 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         templateId: selectedTemplateId,
         contactIds,
       });
+      setError('');
       setInfo(
         `Sent: ${data.sentCount}, Failed: ${data.failedCount}, Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`,
       );
-      await loadAll();
+      await loadAll().catch(() => {});
     } catch (e) {
       setError(e.response?.data?.error || 'Send failed');
     } finally {

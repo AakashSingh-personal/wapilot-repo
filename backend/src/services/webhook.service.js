@@ -190,7 +190,43 @@ async function resolveInboundContext({ phoneNumberId, fromWaId, contactName }) {
     });
   }
 
+  try {
+    await syncInboundCustomerToContactBook({
+      businessId: business.id,
+      customer,
+      profileName: contactName,
+    });
+  } catch (e) {
+    log('warn', 'contact_book_sync_failed', {
+      message: e.message,
+      businessId: business.id,
+      customerId: customer.id,
+    });
+  }
+
   return { business, customer, phone };
+}
+
+/** Ensure WhatsApp customers appear in the communications contact book for campaigns. */
+async function syncInboundCustomerToContactBook({ businessId, customer, profileName }) {
+  const phone = customer.phone;
+  if (!phone || String(phone).replace(/\D/g, '').length < 10) return;
+  const name = customer.name || profileName || null;
+  const existing = await prisma.contact.findUnique({
+    where: { businessId_phone: { businessId, phone } },
+  });
+  if (!existing) {
+    await prisma.contact.create({
+      data: { businessId, phone, name },
+    });
+    return;
+  }
+  if (name && existing.name !== name) {
+    await prisma.contact.update({
+      where: { id: existing.id },
+      data: { name },
+    });
+  }
 }
 
 async function bumpInboundCustomerActivity(customerId) {
