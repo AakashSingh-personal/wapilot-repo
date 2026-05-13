@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api.js';
 import { subscribeRealtime } from '../realtime/socket.js';
 
@@ -40,6 +40,8 @@ const META_LIMITS = {
 };
 
 export default function Communications({ forcedTab = null, templateMode = 'combined' }) {
+  const params = useParams();
+  const editTemplateId = templateMode === 'edit' ? params.templateId : null;
   const TXN_PAGE_SIZE = 20;
   const tabs = ['WALLET', 'SEND', 'TEMPLATES', 'FIELDS', 'CONTACTS', 'CONTACT_BOOK'];
   const tabMeta = {
@@ -104,6 +106,8 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   const [buttons, setButtons] = useState([]);
   const [templateValidationErrors, setTemplateValidationErrors] = useState([]);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [savingEditTemplate, setSavingEditTemplate] = useState(false);
+  const [editingTemplateLoading, setEditingTemplateLoading] = useState(false);
   const [uploadingContactsLoading, setUploadingContactsLoading] = useState(false);
   const [syncingTemplateId, setSyncingTemplateId] = useState('');
   const [metaTemplateOptions, setMetaTemplateOptions] = useState({
@@ -130,6 +134,10 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   const [mappingRows, setMappingRows] = useState([]);
   const [mappingLoading, setMappingLoading] = useState(false);
   const [sendPreview, setSendPreview] = useState('');
+  const [cloneSource, setCloneSource] = useState(null);
+  const [cloneNewName, setCloneNewName] = useState('');
+  const [cloneOnMeta, setCloneOnMeta] = useState(false);
+  const [cloneSubmitting, setCloneSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState(forcedTab || 'WALLET');
   const navigate = useNavigate();
 
@@ -584,6 +592,90 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, txnFilter, txnOnlyTopups]);
 
+  useEffect(() => {
+    if (templateMode !== 'edit' || !editTemplateId) return;
+    let cancelled = false;
+    setEditingTemplateLoading(true);
+    (async () => {
+      try {
+        await ensureMetaTemplateOptionsLoaded();
+        await loadPersonalizationCatalog();
+        await loadPersonalizationDefinitions();
+        const { data } = await api.get(`/templates/${editTemplateId}`);
+        if (cancelled) return;
+        const tpl = data.template;
+        setTemplateName(tpl.name || '');
+        const snap = tpl.metaSnapshot;
+        if (snap?.category) setTemplateCategory(snap.category);
+        if (snap?.language) setTemplateLanguage(snap.language);
+        const comps = Array.isArray(snap?.components) ? snap.components : [];
+        let bodyFromSnap = '';
+        const snapButtons = [];
+        let hasHeader = false;
+        let hasFooter = false;
+        for (const c of comps) {
+          if (c.type === 'HEADER') {
+            hasHeader = true;
+            if (c.format === 'TEXT') {
+              setHeaderFormat('TEXT');
+              setHeaderText(c.text || '');
+            } else {
+              setHeaderFormat(c.format || 'IMAGE');
+              const h = c.example?.header_handle?.[0];
+              setHeaderMediaUrl(h || '');
+            }
+          }
+          if (c.type === 'BODY') bodyFromSnap = c.text || '';
+          if (c.type === 'FOOTER') {
+            hasFooter = true;
+            setFooterText(c.text || '');
+          }
+          if (c.type === 'BUTTONS' && Array.isArray(c.buttons)) {
+            for (const b of c.buttons) {
+              if (b.type === 'QUICK_REPLY') {
+                snapButtons.push({
+                  id: crypto.randomUUID(),
+                  type: 'QUICK_REPLY',
+                  text: b.text || '',
+                  url: '',
+                  phoneNumber: '',
+                });
+              } else if (b.type === 'URL') {
+                snapButtons.push({
+                  id: crypto.randomUUID(),
+                  type: 'URL',
+                  text: b.text || '',
+                  url: b.url || '',
+                  phoneNumber: '',
+                });
+              } else if (b.type === 'PHONE_NUMBER') {
+                snapButtons.push({
+                  id: crypto.randomUUID(),
+                  type: 'PHONE_NUMBER',
+                  text: b.text || '',
+                  url: '',
+                  phoneNumber: b.phone_number || '',
+                });
+              }
+            }
+          }
+        }
+        setIncludeHeader(hasHeader);
+        setIncludeFooter(hasFooter);
+        setTemplateContent(bodyFromSnap || tpl.content || '');
+        setButtons(snapButtons);
+      } catch (e) {
+        if (!cancelled) setError(e.response?.data?.error || 'Failed to load template', 'TEMPLATES');
+      } finally {
+        if (!cancelled) setEditingTemplateLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateMode, editTemplateId]);
+
   async function addMoney() {
     if (!addAmount) return;
     setError('');
@@ -653,6 +745,51 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     }
   }
 
+  function buildComponentsForMeta() {
+    const components = [];
+    if (includeHeader) {
+      if (headerFormat === 'TEXT') {
+        if (!headerText.trim()) {
+          return { error: 'Header text is required for TEXT header', components: null };
+        }
+        components.push({ type: 'HEADER', format: 'TEXT', text: headerText.trim() });
+      } else {
+        if (!headerMediaUrl.trim()) {
+          return { error: 'Upload media for non-text header', components: null };
+        }
+        if (!/\.[a-zA-Z0-9]{2,8}($|\?)/.test(headerMediaUrl.trim())) {
+          return { error: 'Header media URL must be a public file URL with extension', components: null };
+        }
+        components.push({
+          type: 'HEADER',
+          format: headerFormat,
+          example: {
+            header_handle: [headerMediaUrl.trim()],
+          },
+        });
+      }
+    }
+    components.push({ type: 'BODY', text: templateContent.trim() });
+    if (includeFooter && footerText.trim()) {
+      components.push({ type: 'FOOTER', text: footerText.trim() });
+    }
+    if (buttons.length) {
+      components.push({
+        type: 'BUTTONS',
+        buttons: buttons.map((b) => {
+          if (b.type === 'QUICK_REPLY') {
+            return { type: 'QUICK_REPLY', text: b.text };
+          }
+          if (b.type === 'URL') {
+            return { type: 'URL', text: b.text, url: b.url };
+          }
+          return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phoneNumber };
+        }),
+      });
+    }
+    return { error: null, components };
+  }
+
   async function createTemplate() {
     if (!templateName.trim()) return;
     setError('');
@@ -664,49 +801,10 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         setTemplateValidationErrors(builderValidationErrors);
         return;
       }
-      const components = [];
-      if (includeHeader) {
-        if (headerFormat === 'TEXT') {
-          if (!headerText.trim()) {
-            setError('Header text is required for TEXT header');
-            return;
-          }
-          components.push({ type: 'HEADER', format: 'TEXT', text: headerText.trim() });
-        } else {
-          if (!headerMediaUrl.trim()) {
-            setError('Upload media for non-text header');
-            return;
-          }
-          if (!/\.[a-zA-Z0-9]{2,8}($|\?)/.test(headerMediaUrl.trim())) {
-            setError('Header media URL must be a public file URL with extension');
-            return;
-          }
-          components.push({
-            type: 'HEADER',
-            format: headerFormat,
-            example: {
-              header_handle: [headerMediaUrl.trim()],
-            },
-          });
-        }
-      }
-      components.push({ type: 'BODY', text: templateContent.trim() });
-      if (includeFooter && footerText.trim()) {
-        components.push({ type: 'FOOTER', text: footerText.trim() });
-      }
-      if (buttons.length) {
-        components.push({
-          type: 'BUTTONS',
-          buttons: buttons.map((b) => {
-            if (b.type === 'QUICK_REPLY') {
-              return { type: 'QUICK_REPLY', text: b.text };
-            }
-            if (b.type === 'URL') {
-              return { type: 'URL', text: b.text, url: b.url };
-            }
-            return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phoneNumber };
-          }),
-        });
+      const { error: compError, components } = buildComponentsForMeta();
+      if (compError) {
+        setError(compError);
+        return;
       }
       const parsedMetaPayload = { components };
       setTemplateValidationErrors([]);
@@ -729,6 +827,73 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       setError(e.response?.data?.error || 'Could not create template');
     } finally {
       setCreatingTemplate(false);
+    }
+  }
+
+  async function saveEditTemplate(publishToMeta) {
+    if (!editTemplateId) return;
+    if (!templateName.trim()) {
+      setError('Template name is required', 'TEMPLATES');
+      return;
+    }
+    setError('');
+    setInfo('');
+    setTemplateValidationErrors([]);
+    if (publishToMeta && builderValidationErrors.length) {
+      setTemplateValidationErrors(builderValidationErrors);
+      return;
+    }
+    setSavingEditTemplate(true);
+    try {
+      const body = {
+        name: templateName,
+        content: templateContent,
+        category: templateCategory,
+        language: templateLanguage,
+        publishToMeta: !!publishToMeta,
+      };
+      if (publishToMeta) {
+        const { error: compError, components } = buildComponentsForMeta();
+        if (compError) {
+          setError(compError, 'TEMPLATES');
+          return;
+        }
+        body.metaPayload = { components };
+      }
+      await api.patch(`/templates/${editTemplateId}`, body);
+      await loadAll();
+      setInfo(
+        publishToMeta ? 'Template updated and submitted to Meta' : 'Template saved locally',
+        'TEMPLATES',
+      );
+      navigate('/communications/templates');
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not save template', 'TEMPLATES');
+    } finally {
+      setSavingEditTemplate(false);
+    }
+  }
+
+  async function submitClone() {
+    if (!cloneSource?.id || !cloneNewName.trim()) {
+      setError('Enter a name for the clone', 'TEMPLATES');
+      return;
+    }
+    setCloneSubmitting(true);
+    setError('');
+    setInfo('');
+    try {
+      await api.post(`/templates/${cloneSource.id}/clone`, {
+        name: cloneNewName.trim(),
+        createOnMeta: cloneOnMeta,
+      });
+      setCloneSource(null);
+      await reloadTemplatesFromApi();
+      setInfo('Template cloned', 'TEMPLATES');
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not clone template', 'TEMPLATES');
+    } finally {
+      setCloneSubmitting(false);
     }
   }
 
@@ -1243,9 +1408,14 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
 
           {activeTab === 'TEMPLATES' && (
             <>
-          {(templateMode === 'combined' || templateMode === 'create') && (
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-            <div className="font-semibold">Create template</div>
+          {(templateMode === 'combined' || templateMode === 'create' || templateMode === 'edit') && (
+          <div className="relative rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
+            {editingTemplateLoading && templateMode === 'edit' && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/80 dark:bg-slate-900/80 text-sm font-medium text-slate-600">
+                Loading template…
+              </div>
+            )}
+            <div className="font-semibold">{templateMode === 'edit' ? 'Edit template' : 'Create template'}</div>
             <input
               value={templateName}
               onChange={(e) => setTemplateName(e.target.value)}
@@ -1448,6 +1618,35 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                 ))}
               </div>
             )}
+            {templateMode === 'edit' ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => saveEditTemplate(false)}
+                  disabled={savingEditTemplate || editingTemplateLoading}
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >
+                  {savingEditTemplate ? 'Saving…' : 'Save draft (local)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => saveEditTemplate(true)}
+                  disabled={savingEditTemplate || editingTemplateLoading}
+                  className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >
+                  {savingEditTemplate ? 'Saving…' : 'Save & publish to Meta'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/communications/templates')}
+                  disabled={savingEditTemplate}
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-semibold"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <>
             <button
               type="button"
               onClick={createTemplate}
@@ -1465,7 +1664,50 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                 Back to templates
               </button>
             )}
+              </>
+            )}
           </div>
+          )}
+
+          {cloneSource && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="max-w-md w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-5 space-y-4">
+                <div className="font-semibold text-sm">Clone template</div>
+                <p className="text-xs text-slate-500">
+                  From: <span className="font-medium text-slate-700 dark:text-slate-200">{cloneSource.name}</span>
+                </p>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">New template name</label>
+                  <input
+                    value={cloneNewName}
+                    onChange={(e) => setCloneNewName(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  />
+                </div>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={cloneOnMeta} onChange={(e) => setCloneOnMeta(e.target.checked)} />
+                  Also create on Meta (WhatsApp)
+                </label>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm"
+                    onClick={() => setCloneSource(null)}
+                    disabled={cloneSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cloneSubmitting}
+                    className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+                    onClick={() => submitClone()}
+                  >
+                    {cloneSubmitting ? 'Cloning…' : 'Clone'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {(templateMode === 'combined' || templateMode === 'list') && (
@@ -1511,7 +1753,26 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                       </span>
                     </td>
                     <td className="px-4 py-3">{t.status}</td>
-                    <td className="px-4 py-3 space-x-2">
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-x-2 gap-y-1">
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-brand-700"
+                        onClick={() => navigate(`/communications/templates/${t.id}/edit`)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-slate-700 dark:text-slate-200"
+                        onClick={() => {
+                          setCloneSource({ id: t.id, name: t.name });
+                          setCloneNewName(`Copy of ${t.name}`);
+                          setCloneOnMeta(false);
+                        }}
+                      >
+                        Clone
+                      </button>
                       <button
                         type="button"
                         disabled={syncingTemplateId === t.id}
@@ -1527,6 +1788,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                       >
                         Map {'{{n}}'}
                       </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

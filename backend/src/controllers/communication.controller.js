@@ -4,7 +4,7 @@ import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
 import { structuredContent } from '../utils/waStructuredMessage.js';
-import { createWhatsAppTemplate, listWhatsAppTemplates } from '../services/whatsapp.service.js';
+import { createWhatsAppTemplate, listWhatsAppTemplates, updateWhatsAppTemplate } from '../services/whatsapp.service.js';
 import { uploadBase64ToSupabase } from '../services/supabase.service.js';
 import { resolvePersonalizedTemplateText } from '../services/variableResolution.service.js';
 import {
@@ -104,6 +104,22 @@ function normalizeMetaComponents(components) {
   });
 }
 
+async function resolveMetaTemplateId(template, businessId) {
+  if (template?.metaTemplateId) return template.metaTemplateId;
+  const metaTemplates = await listWhatsAppTemplates();
+  const lookup = templateMetaLookupName(template, businessId);
+  const row = metaTemplates.find((m) => m.name === lookup || m.name === template.name);
+  return row?.id ? String(row.id) : null;
+}
+
+function templateMetaLookupName(template, businessId) {
+  const snap = template?.metaSnapshot;
+  if (snap && typeof snap === 'object' && typeof snap.name === 'string' && snap.name.trim()) {
+    return snap.name.trim();
+  }
+  return toMetaTemplateName(template.name, businessId);
+}
+
 const META_TEMPLATE_OPTIONS = {
   categories: ['MARKETING', 'UTILITY', 'AUTHENTICATION'],
   languages: [
@@ -128,20 +144,23 @@ async function syncTemplateStatusesFromMeta(businessId) {
   const byName = new Map(metaTemplates.map((t) => [t.name, t]));
   const local = await prisma.template.findMany({
     where: { businessId },
-    select: { id: true, name: true, status: true },
+    select: { id: true, name: true, status: true, metaTemplateId: true, metaSnapshot: true },
   });
 
   const updates = [];
   for (const t of local) {
-    const metaName = toMetaTemplateName(t.name, businessId);
-    const meta = byName.get(metaName) || byName.get(t.name);
+    const lookup = templateMetaLookupName(t, businessId);
+    const meta = byName.get(lookup) || byName.get(t.name);
     if (!meta?.status) continue;
     const nextStatus = mapMetaStatusToLocal(meta.status);
-    if (nextStatus !== t.status) {
+    const data = {};
+    if (nextStatus !== t.status) data.status = nextStatus;
+    if (meta?.id && !t.metaTemplateId) data.metaTemplateId = String(meta.id);
+    if (Object.keys(data).length) {
       updates.push(
         prisma.template.update({
           where: { id: t.id },
-          data: { status: nextStatus },
+          data,
         }),
       );
     }
@@ -525,19 +544,22 @@ export async function listTemplates(req, res, next) {
       const byName = new Map(metaTemplates.map((t) => [t.name, t]));
       const localForSync = await prisma.template.findMany({
         where: { businessId: req.user.businessId },
-        select: { id: true, name: true, status: true },
+        select: { id: true, name: true, status: true, metaTemplateId: true, metaSnapshot: true },
       });
       const updates = [];
       for (const t of localForSync) {
-        const metaName = toMetaTemplateName(t.name, req.user.businessId);
-        const meta = byName.get(metaName) || byName.get(t.name);
+        const lookup = templateMetaLookupName(t, req.user.businessId);
+        const meta = byName.get(lookup) || byName.get(t.name);
         if (!meta?.status) continue;
         const nextStatus = mapMetaStatusToLocal(meta.status);
-        if (nextStatus !== t.status) {
+        const data = {};
+        if (nextStatus !== t.status) data.status = nextStatus;
+        if (meta?.id && !t.metaTemplateId) data.metaTemplateId = String(meta.id);
+        if (Object.keys(data).length) {
           updates.push(
             prisma.template.update({
               where: { id: t.id },
-              data: { status: nextStatus },
+              data,
             }),
           );
         }
@@ -559,7 +581,7 @@ export async function listTemplates(req, res, next) {
     });
     const byMetaName = new Map((metaTemplates || []).map((t) => [t.name, t]));
     const withMeta = templates.map((t) => {
-      const metaName = toMetaTemplateName(t.name, req.user.businessId);
+      const metaName = templateMetaLookupName(t, req.user.businessId);
       const meta = byMetaName.get(metaName) || byMetaName.get(t.name) || null;
       return {
         ...t,
@@ -641,15 +663,228 @@ export async function createTemplate(req, res, next) {
     const createdMeta = await createWhatsAppTemplate({
       payload,
     });
+    const metaSnapshot = {
+      name: metaName,
+      category: payload.category,
+      language: payload.language,
+      components: payload.components,
+    };
     const template = await prisma.template.create({
       data: {
         businessId: req.user.businessId,
         name,
         content: localContent,
         status: mapMetaStatusToLocal(createdMeta?.status),
+        metaTemplateId: createdMeta?.id != null ? String(createdMeta.id) : null,
+        metaSnapshot,
       },
     });
     res.status(201).json({ template, meta: createdMeta });
+  } catch (e) {
+    if (typeof e?.message === 'string' && e.message.includes('Meta template create failed:')) {
+      e.statusCode = 400;
+      e.publicMessage = e.message.replace('Meta template create failed:', '').trim();
+    }
+    next(e);
+  }
+}
+
+export async function getTemplate(req, res, next) {
+  try {
+    const template = await prisma.template.findFirst({
+      where: { id: req.params.id, businessId: req.user.businessId },
+      include: { variableMappings: { orderBy: { placeholderIndex: 'asc' } } },
+    });
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+    res.json({
+      template: {
+        id: template.id,
+        name: template.name,
+        content: template.content,
+        status: template.status,
+        metaTemplateId: template.metaTemplateId,
+        metaSnapshot: template.metaSnapshot,
+        createdAt: template.createdAt,
+        updatedAt: template.updatedAt,
+      },
+      mappings: template.variableMappings,
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function patchTemplate(req, res, next) {
+  try {
+    const id = req.params.id;
+    const { name, content, category, language, metaPayload, publishToMeta } = req.body || {};
+    const template = await prisma.template.findFirst({
+      where: { id, businessId: req.user.businessId },
+    });
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+
+    const metaPayloadObj = metaPayload && typeof metaPayload === 'object' ? metaPayload : null;
+    const nextName = name !== undefined ? String(name).trim() : template.name;
+    if (!nextName) return res.status(400).json({ error: 'name is required' });
+
+    const metaName = toMetaTemplateName(nextName, req.user.businessId);
+    if (!metaName) return res.status(400).json({ error: 'Template name is invalid for Meta' });
+
+    let nextContent =
+      content !== undefined
+        ? String(content).trim()
+        : metaPayloadObj
+          ? extractBodyTextFromComponents(metaPayloadObj.components || [])
+          : template.content;
+    if (!nextContent) {
+      return res.status(400).json({ error: 'content or BODY in metaPayload is required' });
+    }
+
+    let metaResponse = null;
+    let nextMetaId = template.metaTemplateId;
+    let nextSnapshot = template.metaSnapshot;
+
+    if (publishToMeta) {
+      if (!metaPayloadObj?.components?.length) {
+        return res.status(400).json({
+          error: 'publishToMeta requires metaPayload.components (same shape as template create).',
+        });
+      }
+      const metaId = await resolveMetaTemplateId(template, req.user.businessId);
+      if (!metaId) {
+        return res.status(400).json({
+          error: 'Template not linked on Meta yet. Use “Sync from Meta” after Meta approves the template.',
+        });
+      }
+      const cat = metaPayloadObj.category || category || 'MARKETING';
+      const lang = metaPayloadObj.language || language || 'en_US';
+      const components = normalizeMetaComponents(metaPayloadObj.components);
+      metaResponse = await updateWhatsAppTemplate({
+        templateId: metaId,
+        payload: { category: cat, components },
+      });
+      nextMetaId = metaId;
+      nextSnapshot = {
+        name: templateMetaLookupName(template, req.user.businessId),
+        category: cat,
+        language: lang,
+        components,
+      };
+      nextContent = extractBodyTextFromComponents(components) || nextContent;
+    } else if (metaPayloadObj?.components?.length) {
+      nextSnapshot = {
+        name: templateMetaLookupName(template, req.user.businessId),
+        category: metaPayloadObj.category || category || (template.metaSnapshot?.category ?? 'MARKETING'),
+        language: metaPayloadObj.language || language || (template.metaSnapshot?.language ?? 'en_US'),
+        components: normalizeMetaComponents(metaPayloadObj.components),
+      };
+    }
+
+    const data = {
+      name: nextName,
+      content: nextContent,
+    };
+    if (nextMetaId) data.metaTemplateId = nextMetaId;
+    if (publishToMeta || metaPayloadObj?.components?.length) {
+      data.metaSnapshot = nextSnapshot;
+    }
+    if (publishToMeta && metaResponse?.status) {
+      data.status = mapMetaStatusToLocal(metaResponse.status);
+    }
+    const updated = await prisma.template.update({
+      where: { id },
+      data,
+    });
+    res.json({ template: updated, meta: metaResponse });
+  } catch (e) {
+    if (typeof e?.message === 'string' && e.message.includes('Meta template update failed:')) {
+      e.statusCode = 400;
+      e.publicMessage = e.message.replace('Meta template update failed:', '').trim();
+    }
+    next(e);
+  }
+}
+
+export async function cloneTemplate(req, res, next) {
+  try {
+    const source = await prisma.template.findFirst({
+      where: { id: req.params.id, businessId: req.user.businessId },
+      include: { variableMappings: true },
+    });
+    if (!source) return res.status(404).json({ error: 'Template not found' });
+
+    const newName = req.body?.name?.trim();
+    if (!newName) return res.status(400).json({ error: 'name is required' });
+
+    const dup = await prisma.template.findFirst({
+      where: { businessId: req.user.businessId, name: newName },
+    });
+    if (dup) return res.status(409).json({ error: 'A template with this name already exists.' });
+
+    const { createOnMeta, category, language, metaPayload } = req.body || {};
+
+    const created = await prisma.$transaction(async (tx) => {
+      const tpl = await tx.template.create({
+        data: {
+          businessId: req.user.businessId,
+          name: newName,
+          content: source.content,
+          status: 'NOT_WORKING',
+          metaSnapshot: source.metaSnapshot ?? undefined,
+        },
+      });
+      if (source.variableMappings?.length) {
+        await tx.templateVariableMapping.createMany({
+          data: source.variableMappings.map((m) => ({
+            templateId: tpl.id,
+            placeholderIndex: m.placeholderIndex,
+            variableKey: m.variableKey,
+          })),
+        });
+      }
+      return tpl;
+    });
+
+    let meta = null;
+    if (createOnMeta) {
+      const metaName = toMetaTemplateName(newName, req.user.businessId);
+      if (!metaName) return res.status(400).json({ error: 'Template name is invalid for Meta' });
+      const metaPayloadObj = metaPayload && typeof metaPayload === 'object' ? metaPayload : source.metaSnapshot;
+      let payload;
+      if (metaPayloadObj?.components?.length) {
+        payload = {
+          name: metaName,
+          category: metaPayloadObj.category || category || 'MARKETING',
+          language: metaPayloadObj.language || language || 'en_US',
+          components: normalizeMetaComponents(metaPayloadObj.components),
+        };
+      } else {
+        payload = {
+          name: metaName,
+          category: category || 'MARKETING',
+          language: language || 'en_US',
+          components: [{ type: 'BODY', text: toMetaTemplateBody(created.content) }],
+        };
+      }
+      meta = await createWhatsAppTemplate({ payload });
+      const snapshot = {
+        name: metaName,
+        category: payload.category,
+        language: payload.language,
+        components: payload.components,
+      };
+      await prisma.template.update({
+        where: { id: created.id },
+        data: {
+          status: mapMetaStatusToLocal(meta?.status),
+          metaTemplateId: meta?.id != null ? String(meta.id) : null,
+          metaSnapshot: snapshot,
+        },
+      });
+    }
+
+    const fresh = await prisma.template.findFirst({ where: { id: created.id } });
+    res.status(201).json({ template: fresh, meta });
   } catch (e) {
     if (typeof e?.message === 'string' && e.message.includes('Meta template create failed:')) {
       e.statusCode = 400;
@@ -665,7 +900,7 @@ export async function updateTemplateStatus(req, res, next) {
       where: { id: req.params.id, businessId: req.user.businessId },
     });
     if (!template) return res.status(404).json({ error: 'Template not found' });
-    const metaName = toMetaTemplateName(template.name, req.user.businessId);
+    const metaName = templateMetaLookupName(template, req.user.businessId);
     const metaTemplates = await listWhatsAppTemplates();
     const meta = metaTemplates.find((t) => t.name === metaName || t.name === template.name);
     if (!meta?.status) {
@@ -673,7 +908,10 @@ export async function updateTemplateStatus(req, res, next) {
     }
     const updated = await prisma.template.update({
       where: { id: template.id },
-      data: { status: mapMetaStatusToLocal(meta.status) },
+      data: {
+        status: mapMetaStatusToLocal(meta.status),
+        ...(meta?.id ? { metaTemplateId: String(meta.id) } : {}),
+      },
     });
     res.json({ template: updated, metaStatus: meta.status });
   } catch (e) {

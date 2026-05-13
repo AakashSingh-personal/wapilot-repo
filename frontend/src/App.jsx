@@ -72,6 +72,10 @@ export default function App() {
         <Route path="/communications/send" element={<Communications forcedTab="SEND" />} />
         <Route path="/communications/templates" element={<Communications forcedTab="TEMPLATES" templateMode="list" />} />
         <Route path="/communications/templates/create" element={<Communications forcedTab="TEMPLATES" templateMode="create" />} />
+        <Route
+          path="/communications/templates/:templateId/edit"
+          element={<Communications forcedTab="TEMPLATES" templateMode="edit" />}
+        />
         <Route path="/communications/fields" element={<Communications forcedTab="FIELDS" />} />
         <Route path="/communications/contacts" element={<Communications forcedTab="CONTACTS" />} />
         <Route path="/communications/contact-book" element={<Communications forcedTab="CONTACT_BOOK" />} />

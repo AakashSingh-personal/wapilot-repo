@@ -206,6 +206,25 @@ export async function createWhatsAppTemplate({ wabaId, payload }) {
   }
 }
 
+export async function updateWhatsAppTemplate({ templateId, payload }) {
+  const t = token();
+  if (!t || !templateId) {
+    throw new Error('Missing WHATSAPP_ACCESS_TOKEN or template id');
+  }
+  const url = `${GRAPH}/${String(templateId).trim()}`;
+  try {
+    const res = await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${t}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    return res.data;
+  } catch (e) {
+    throw new Error(`Meta template update failed: ${toMetaError(e)}`);
+  }
+}
+
 export async function listWhatsAppTemplates({ wabaId, limit = 200 } = {}) {
   const t = token();
   const resolvedWabaId = resolveWabaId(wabaId);

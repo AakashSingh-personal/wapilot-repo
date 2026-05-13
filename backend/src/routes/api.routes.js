@@ -71,6 +71,9 @@ router.delete('/user-management/users/:id', authMiddleware, userManagementContro
 router.get('/templates', authMiddleware, communicationController.listTemplates);
 router.get('/templates/meta-options', authMiddleware, communicationController.metaTemplateOptions);
 router.post('/templates', authMiddleware, communicationController.createTemplate);
+router.get('/templates/:id', authMiddleware, communicationController.getTemplate);
+router.patch('/templates/:id', authMiddleware, communicationController.patchTemplate);
+router.post('/templates/:id/clone', authMiddleware, communicationController.cloneTemplate);
 router.get('/templates/:id/placeholders', authMiddleware, variablesController.getTemplatePlaceholders);
 router.get('/templates/:id/variable-mappings', authMiddleware, variablesController.getVariableMappings);
 router.put('/templates/:id/variable-mappings', authMiddleware, variablesController.putVariableMappings);
