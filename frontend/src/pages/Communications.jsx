@@ -385,38 +385,6 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, txnFilter, txnOnlyTopups]);
 
-  const AUTO_REFRESH_MS = 10000;
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (document.hidden) return;
-      (async () => {
-        try {
-          if (activeTab === 'WALLET') {
-            await refreshWallet();
-            await loadWalletTransactions({
-              filter: txnFilter,
-              offset: 0,
-              append: false,
-              onlyTopups: txnOnlyTopups,
-            });
-          } else if (activeTab === 'SEND') {
-            await refreshWallet();
-            await reloadContactsFromApi();
-            await reloadTemplatesFromApi();
-          } else if (activeTab === 'TEMPLATES') {
-            await reloadTemplatesFromApi();
-          } else if (activeTab === 'CONTACT_BOOK') {
-            await loadContactBook();
-          }
-        } catch {
-          /* ignore */
-        }
-      })();
-    }, AUTO_REFRESH_MS);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, txnFilter, txnOnlyTopups]);
-
   async function addMoney() {
     if (!addAmount) return;
     setError('');

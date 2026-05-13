@@ -37,14 +37,6 @@ export default function Payments() {
     };
   }, []);
 
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (document.hidden) return;
-      load().catch(() => {});
-    }, 5000);
-    return () => clearInterval(t);
-  }, []);
-
   async function markPaid(id) {
     setError('');
     try {

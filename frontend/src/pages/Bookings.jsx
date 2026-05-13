@@ -19,10 +19,8 @@ export default function Bookings() {
       }
     };
     load();
-    const id = setInterval(load, 5000);
     return () => {
       cancelled = true;
-      clearInterval(id);
     };
   }, []);
 

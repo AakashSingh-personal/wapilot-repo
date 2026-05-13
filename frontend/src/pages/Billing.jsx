@@ -26,15 +26,6 @@ export default function Billing() {
     };
   }, []);
 
-  useEffect(() => {
-    const hasPending = status?.pendingPayment;
-    if (!hasPending) return undefined;
-    const t = setInterval(() => {
-      refresh().catch(() => {});
-    }, 4000);
-    return () => clearInterval(t);
-  }, [status?.pendingPayment]);
-
   async function ensureRazorpayScript() {
     if (window.Razorpay) return true;
     return new Promise((resolve) => {
