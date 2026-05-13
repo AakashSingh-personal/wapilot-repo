@@ -164,6 +164,29 @@ async function getOrCreateWallet(tx, businessId) {
   });
 }
 
+/** Undo a per-message debit when WhatsApp send fails or is skipped (keeps wallet truthful). */
+async function refundCommunicationCharge({ businessId, campaignId, contactId, phone }) {
+  await prisma.$transaction(async (tx) => {
+    const wallet = await getOrCreateWallet(tx, businessId);
+    const balance = Number(wallet.balance);
+    const nextBalance = (balance + MESSAGE_COST_INR).toFixed(2);
+    await tx.wallet.update({
+      where: { id: wallet.id },
+      data: { balance: nextBalance },
+    });
+    await tx.walletTransaction.create({
+      data: {
+        businessId,
+        campaignId,
+        contactId,
+        amount: MESSAGE_COST_INR.toFixed(2),
+        type: 'CREDIT',
+        description: `Refund: WhatsApp send failed for ${phone}`,
+      },
+    });
+  });
+}
+
 export async function getWallet(req, res, next) {
   try {
     const wallet = await prisma.wallet.upsert({
@@ -759,13 +782,8 @@ export async function sendTemplateCommunication(req, res, next) {
         phone: target.phone,
       });
       try {
-        const sendRes = await sendWhatsAppText({
-          phoneNumberId,
-          toPhoneE164: target.phone,
-          body: content,
-        });
-        const waMessageId = sendRes?.messages?.[0]?.id;
-        const charged = await prisma.$transaction(async (tx) => {
+        // Debit before calling Meta so we never report "failed" after WhatsApp already accepted the message.
+        const debited = await prisma.$transaction(async (tx) => {
           const wallet = await getOrCreateWallet(tx, req.user.businessId);
           const balance = Number(wallet.balance);
           if (balance < MESSAGE_COST_INR) return false;
@@ -786,60 +804,124 @@ export async function sendTemplateCommunication(req, res, next) {
           });
           return true;
         });
-        if (!charged) {
+        if (!debited) {
           blocked.push({
             contactId: target.walletContactId,
             customerId: target.customerId,
             phone: target.phone,
-            reason: 'INSUFFICIENT_BALANCE_POST_SEND',
+            reason: 'INSUFFICIENT_BALANCE',
           });
           failedCount += 1;
           continue;
         }
-        const customerRecord = await prisma.customer.upsert({
-          where: { businessId_phone: { businessId: req.user.businessId, phone: target.phone } },
-          update: { name: target.name || undefined },
-          create: {
-            businessId: req.user.businessId,
-            phone: target.phone,
-            name: target.name,
-          },
-        });
-        await prisma.message.create({
-          data: {
-            customerId: customerRecord.id,
-            businessId: req.user.businessId,
-            content: structuredContent({
-              kind: 'text',
-              text: content,
-              direction: 'outbound',
-              status: 'sent',
-              waMessageId: waMessageId || undefined,
-              source: 'template_campaign',
-            }),
-            type: 'STAFF',
-          },
-        });
-        sentCount += 1;
-        totalCharged += MESSAGE_COST_INR;
 
+        let sendRes;
         try {
-          const pauseBy = req.user?.userId ?? null;
-          await prisma.customer.update({
-            where: { id: customerRecord.id },
-            data: {
-              aiOverride: true,
-              aiOverrideByUserId: pauseBy,
-              aiOverrideAt: new Date(),
+          sendRes = await sendWhatsAppText({
+            phoneNumberId,
+            toPhoneE164: target.phone,
+            body: content,
+          });
+        } catch (sendErr) {
+          await refundCommunicationCharge({
+            businessId: req.user.businessId,
+            campaignId: campaign.id,
+            contactId: target.walletContactId,
+            phone: target.phone,
+          }).catch((refundErr) =>
+            log('error', 'communications_refund_after_send_failed', {
+              message: refundErr.message,
+              phone: target.phone,
+            }),
+          );
+          log('warn', 'communications_send_whatsapp_failed', {
+            message: sendErr.message,
+            code: sendErr.code,
+            phone: target.phone,
+          });
+          failedCount += 1;
+          continue;
+        }
+
+        if (sendRes?.skipped) {
+          await refundCommunicationCharge({
+            businessId: req.user.businessId,
+            campaignId: campaign.id,
+            contactId: target.walletContactId,
+            phone: target.phone,
+          }).catch((refundErr) =>
+            log('error', 'communications_refund_after_skipped_send', {
+              message: refundErr.message,
+              phone: target.phone,
+            }),
+          );
+          blocked.push({
+            contactId: target.walletContactId,
+            customerId: target.customerId,
+            phone: target.phone,
+            reason: 'WHATSAPP_NOT_CONFIGURED',
+          });
+          failedCount += 1;
+          continue;
+        }
+
+        const waMessageId = sendRes?.messages?.[0]?.id;
+        if (!waMessageId) {
+          log('warn', 'communications_send_missing_wa_message_id', { phone: target.phone });
+        }
+
+        // WhatsApp accepted the message and wallet is already debited — DB errors here must not mark send as failed.
+        try {
+          const customerRecord = await prisma.customer.upsert({
+            where: { businessId_phone: { businessId: req.user.businessId, phone: target.phone } },
+            update: { name: target.name || undefined },
+            create: {
+              businessId: req.user.businessId,
+              phone: target.phone,
+              name: target.name,
             },
           });
-        } catch (pauseErr) {
-          log('warn', 'communications_ai_pause_failed', {
-            message: pauseErr.message,
-            code: pauseErr.code,
-            customerId: customerRecord.id,
+          await prisma.message.create({
+            data: {
+              customerId: customerRecord.id,
+              businessId: req.user.businessId,
+              content: structuredContent({
+                kind: 'text',
+                text: content,
+                direction: 'outbound',
+                status: 'sent',
+                waMessageId: waMessageId || undefined,
+                source: 'template_campaign',
+              }),
+              type: 'STAFF',
+            },
+          });
+          try {
+            const pauseBy = req.user?.userId ?? null;
+            await prisma.customer.update({
+              where: { id: customerRecord.id },
+              data: {
+                aiOverride: true,
+                aiOverrideByUserId: pauseBy,
+                aiOverrideAt: new Date(),
+              },
+            });
+          } catch (pauseErr) {
+            log('warn', 'communications_ai_pause_failed', {
+              message: pauseErr.message,
+              code: pauseErr.code,
+              customerId: customerRecord.id,
+            });
+          }
+        } catch (bookErr) {
+          log('error', 'communications_post_send_bookkeeping_failed', {
+            message: bookErr.message,
+            code: bookErr.code,
+            phone: target.phone,
           });
         }
+        sentCount += 1;
+        totalCharged += MESSAGE_COST_INR;
       } catch (loopErr) {
         log('warn', 'communications_send_iteration_failed', {
           message: loopErr.message,

@@ -605,8 +605,12 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         contactIds,
       });
       setError('');
+      const fc = Number(data.failedCount) || 0;
+      const sc = Number(data.sentCount) || 0;
       setInfo(
-        `Sent: ${data.sentCount}, Failed: ${data.failedCount}, Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`,
+        fc > 0
+          ? `Sent: ${sc}, Failed: ${fc}, Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`
+          : `Delivered: ${sc}. Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`,
       );
       await loadAll().catch(() => {});
     } catch (e) {
