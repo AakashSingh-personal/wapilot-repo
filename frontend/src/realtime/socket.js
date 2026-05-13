@@ -23,11 +23,16 @@ let manuallyStopped = false;
 let phase = 'idle';
 
 function buildWsUrl() {
-  const base = import.meta.env.VITE_API_URL ?? '';
+  const envBase = import.meta.env.VITE_API_URL?.trim?.() || '';
+  const pageOrigin =
+    typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
+  // Prefer explicit API origin; otherwise same page origin (Vite proxy / same-host API).
+  const base = envBase || pageOrigin;
   if (!base) return '';
   try {
-    const u = new URL(base);
+    const u = new URL(base, pageOrigin || undefined);
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+    // Realtime upgrade is served on the API host at this path (not under arbitrary REST path prefixes).
     u.pathname = REALTIME_PATH;
     u.search = '';
     u.hash = '';
@@ -138,6 +143,7 @@ function connectNow() {
 
     if (data.type === 'auth_error') {
       setConnected(false);
+      emitEvent({ type: 'auth_error', error: data.error || 'auth_failed' });
       return;
     }
 

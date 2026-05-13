@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { log } from '../utils/logger.js';
-import { publish } from '../realtime/publisher.js';
+import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
 import { sendWhatsAppImageUrl, sendWhatsAppText } from '../services/whatsapp.service.js';
 import { structuredContent } from '../utils/waStructuredMessage.js';
@@ -104,21 +104,6 @@ export async function sendMessage(req, res, next) {
       },
     });
 
-    await publish({
-      businessId: req.user.businessId,
-      customerId,
-      conversationId: customerId,
-      type: EventType.MESSAGE_UPDATED,
-      reason: 'delivery_status',
-    });
-    await publish({
-      businessId: req.user.businessId,
-      customerId,
-      conversationId: customerId,
-      type: EventType.MESSAGE_CREATED,
-      reason: 'staff_outbound',
-    });
-
     try {
       await prisma.customer.update({
         where: { id: customerId },
@@ -136,12 +121,13 @@ export async function sendMessage(req, res, next) {
       });
     }
 
-    await publish({
+    const fullMsg = await prisma.message.findUnique({ where: { id: created.id } });
+    await publishInboxLive({
       businessId: req.user.businessId,
       customerId,
-      conversationId: customerId,
-      type: EventType.AI_CONTROL_CHANGED,
-      reason: 'staff_send_pause',
+      type: EventType.MESSAGE_CREATED,
+      reason: 'staff_outbound',
+      message: fullMsg,
     });
 
     res.json({ ok: true });

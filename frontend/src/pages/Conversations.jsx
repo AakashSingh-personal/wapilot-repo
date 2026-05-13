@@ -136,6 +136,7 @@ export default function Conversations() {
   const [resumeAiMode, setResumeAiMode] = useState('NEW_MESSAGES_ONLY');
   const [loadingAiControl, setLoadingAiControl] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [realtimeSyncError, setRealtimeSyncError] = useState('');
   const [presenceTypingName, setPresenceTypingName] = useState('');
   const [presenceViewingName, setPresenceViewingName] = useState('');
 
@@ -177,6 +178,41 @@ export default function Conversations() {
     return buildConversationQuery({ session, message });
   }, [filterSession, filterMessage]);
 
+  const applyWsInboxRow = useCallback((row) => {
+    if (!row?.id) return;
+    setThreads((prev) => {
+      const map = new Map(prev.map((t) => [t.id, t]));
+      const prevRow = map.get(row.id);
+      map.set(row.id, prevRow ? { ...prevRow, ...row } : row);
+      const list = Array.from(map.values());
+      list.sort((a, b) => {
+        const ta = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+        const tb = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+        if (tb !== ta) return tb - ta;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      return list;
+    });
+  }, []);
+
+  const applyWsMessage = useCallback((msg, customerId) => {
+    if (!msg?.id || !customerId) return;
+    setMessages((prev) => {
+      if (selectedIdRef.current !== customerId) return prev;
+      const next = new Map(prev.map((m) => [m.id, m]));
+      const existing = next.get(msg.id);
+      next.set(msg.id, existing ? { ...existing, ...msg } : msg);
+      return Array.from(next.values()).sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
+    });
+  }, []);
+
+  const hasActiveConversationFilters = useCallback(
+    () => conversationQuerySuffix.length > 0,
+    [conversationQuerySuffix],
+  );
+
   const loadThreads = useCallback(async () => {
     try {
       const { data } = await api.get(`/dashboard/conversations${conversationQuerySuffix}`);
@@ -195,6 +231,12 @@ export default function Conversations() {
       const { data } = await api.get(`/dashboard/messages/${customerId}`);
       const list = Array.isArray(data) ? data : data?.messages ?? [];
       setMessages(list);
+      const ai = data && !Array.isArray(data) ? data.aiControl : null;
+      if (ai && customerId) {
+        setThreads((prev) =>
+          prev.map((t) => (t.id === customerId ? { ...t, aiControl: ai } : t)),
+        );
+      }
     } catch (e) {
       setError(e.response?.data?.error || 'Failed to load messages');
     }
@@ -225,14 +267,26 @@ export default function Conversations() {
 
     const unsubConn = subscribeConnectionState((connected) => {
       setRealtimeConnected(connected);
-      if (connected) clearFallback();
-      else startFallback();
+      if (connected) {
+        setRealtimeSyncError('');
+        clearFallback();
+      } else {
+        startFallback();
+      }
     });
 
     const handler = createInboxEventHandler({
       loadThreads,
       loadMessages,
       getSelectedCustomerId: () => selectedIdRef.current,
+      hasActiveConversationFilters,
+      applyWsInboxRow,
+      applyWsMessage,
+      onAuthError: () => {
+        setRealtimeSyncError(
+          'Live sync failed (check VITE_API_URL matches your API, JWT, and that WebSockets are allowed). Inbox still loads over HTTP.',
+        );
+      },
       onAgentTyping: (evt) => {
         const uid = String(evt.userId || '');
         if (user?.id && uid === user.id) return;
@@ -275,7 +329,15 @@ export default function Conversations() {
       unsubRc();
       clearFallback();
     };
-  }, [loadThreads, loadMessages, user?.id, user?.email]);
+  }, [
+    loadThreads,
+    loadMessages,
+    user?.id,
+    user?.email,
+    hasActiveConversationFilters,
+    applyWsInboxRow,
+    applyWsMessage,
+  ]);
 
   useEffect(() => {
     if (!selectedId || !user?.email) return undefined;
@@ -550,13 +612,19 @@ export default function Conversations() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Chats</h1>
         <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Same thread as WhatsApp — messages sync here every few seconds. Replies go to the customer on WhatsApp.
+          Same thread as WhatsApp. The inbox list and messages load from the API; when live sync is on, small
+          WebSocket events trigger refreshes so you do not rely on polling.
         </p>
       </div>
 
       {error && (
         <div className="rounded-lg bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm px-3 py-2">
           {error}
+        </div>
+      )}
+      {realtimeSyncError && (
+        <div className="rounded-lg bg-amber-50 dark:bg-amber-950/35 text-amber-900 dark:text-amber-200 text-sm px-3 py-2">
+          {realtimeSyncError}
         </div>
       )}
       {aiNotice && (

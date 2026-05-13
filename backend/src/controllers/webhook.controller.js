@@ -1,7 +1,7 @@
 import { log } from '../utils/logger.js';
 import * as webhookService from '../services/webhook.service.js';
 import { prisma } from '../lib/prisma.js';
-import { publish } from '../realtime/publisher.js';
+import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
 import { verifyRazorpayWebhookSignature } from '../services/razorpay.service.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
@@ -226,7 +226,7 @@ export async function receiveRazorpayWebhook(req, res) {
           toPhoneE164: customer.phone,
           body,
         });
-        await prisma.message.create({
+        const paymentBotMsg = await prisma.message.create({
           data: {
             customerId: customer.id,
             businessId: cp.businessId,
@@ -234,12 +234,12 @@ export async function receiveRazorpayWebhook(req, res) {
             content: body,
           },
         });
-        await publish({
+        await publishInboxLive({
           businessId: cp.businessId,
           customerId: customer.id,
-          conversationId: customer.id,
           type: EventType.MESSAGE_CREATED,
           reason: 'payment_status_bot',
+          message: paymentBotMsg,
         });
       } catch (e) {
         log('warn', 'customer_payment_status_notify_failed', {

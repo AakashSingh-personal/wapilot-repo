@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { log } from '../utils/logger.js';
-import { publish } from '../realtime/publisher.js';
+import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
 import { structuredContent } from '../utils/waStructuredMessage.js';
@@ -883,7 +883,7 @@ export async function sendTemplateCommunication(req, res, next) {
               name: target.name,
             },
           });
-          await prisma.message.create({
+          const campaignMsg = await prisma.message.create({
             data: {
               customerId: customerRecord.id,
               businessId: req.user.businessId,
@@ -915,19 +915,12 @@ export async function sendTemplateCommunication(req, res, next) {
               customerId: customerRecord.id,
             });
           }
-          await publish({
+          await publishInboxLive({
             businessId: req.user.businessId,
             customerId: customerRecord.id,
-            conversationId: customerRecord.id,
             type: EventType.MESSAGE_CREATED,
             reason: 'template_campaign',
-          });
-          await publish({
-            businessId: req.user.businessId,
-            customerId: customerRecord.id,
-            conversationId: customerRecord.id,
-            type: EventType.AI_CONTROL_CHANGED,
-            reason: 'template_send_pause',
+            message: campaignMsg,
           });
         } catch (bookErr) {
           log('error', 'communications_post_send_bookkeeping_failed', {

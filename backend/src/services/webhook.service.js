@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import { log } from '../utils/logger.js';
 import { publish } from '../realtime/publisher.js';
+import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
 import { detectIntent } from './intent.service.js';
 import { generateAIReply } from './openai.service.js';
@@ -345,10 +346,9 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
     }
 
     if (confirmed) {
-      await publish({
+      await publishInboxLive({
         businessId: business.id,
         customerId: customer.id,
-        conversationId: customer.id,
         type: EventType.CONVERSATION_UPDATED,
         reason: 'booking_confirmed',
       });
@@ -361,10 +361,9 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
       where: { id: customer.id },
       data: { bookingSlotSelectionPending: true },
     });
-    await publish({
+    await publishInboxLive({
       businessId: business.id,
       customerId: customer.id,
-      conversationId: customer.id,
       type: EventType.CONVERSATION_UPDATED,
       reason: 'booking_intent',
     });
@@ -374,10 +373,9 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
       where: { id: customer.id },
       data: { bookingSlotSelectionPending: false },
     });
-    await publish({
+    await publishInboxLive({
       businessId: business.id,
       customerId: customer.id,
-      conversationId: customer.id,
       type: EventType.CONVERSATION_UPDATED,
       reason: 'booking_cancelled',
     });
@@ -488,6 +486,7 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
     },
   });
 
+  const outboundIds = [outgoingText.id];
   try {
     const sent = await sendWhatsAppText({
       phoneNumberId: business.phoneNumberId,
@@ -522,7 +521,7 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
         caption,
       });
       const imageWaMessageId = imgSent?.messages?.[0]?.id;
-      await prisma.message.create({
+      const imgRow = await prisma.message.create({
         data: {
           customerId: customer.id,
           businessId: business.id,
@@ -538,17 +537,22 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
           type: 'BOT',
         },
       });
+      outboundIds.push(imgRow.id);
     }
   } catch (e) {
     log('error', 'webhook_reply_send_failed', { message: e.message });
   }
 
-  await publish({
+  const msgs = await prisma.message.findMany({
+    where: { id: { in: outboundIds } },
+    orderBy: { createdAt: 'asc' },
+  });
+  await publishInboxLive({
     businessId: business.id,
     customerId: customer.id,
-    conversationId: customer.id,
     type: EventType.MESSAGE_CREATED,
     reason: 'ai_auto_reply',
+    ...(msgs.length ? { messages: msgs } : {}),
   });
 
   return { ok: true };
@@ -576,26 +580,16 @@ export async function handleInboundText({
     },
   });
   await bumpInboundCustomerActivity(customer.id);
-  await publish({
+  const userMsg = await prisma.message.findFirst({
+    where: { customerId: customer.id, businessId: business.id, type: 'USER' },
+    orderBy: { createdAt: 'desc' },
+  });
+  await publishInboxLive({
     businessId: business.id,
     customerId: customer.id,
-    conversationId: customer.id,
     type: EventType.MESSAGE_CREATED,
     reason: 'user_inbound_text',
-  });
-  await publish({
-    businessId: business.id,
-    customerId: customer.id,
-    conversationId: customer.id,
-    type: EventType.UNREAD_CHANGED,
-    reason: 'increment',
-  });
-  await publish({
-    businessId: business.id,
-    customerId: customer.id,
-    conversationId: customer.id,
-    type: EventType.SESSION_CHANGED,
-    reason: 'last_inbound',
+    message: userMsg,
   });
 
   const cfg = business.config;
@@ -652,13 +646,14 @@ export async function handleWhatsAppStatuses({ phoneNumberId, statuses = [] }) {
     });
     updated += 1;
     if (business?.id && existing.customerId) {
-      await publish({
+      const full = await prisma.message.findUnique({ where: { id: existing.id } });
+      await publishInboxLive({
         businessId: business.id,
         customerId: existing.customerId,
-        conversationId: existing.customerId,
         type: EventType.MESSAGE_STATUS,
         reason: 'whatsapp_status',
         waStatus: nextStatus,
+        message: full,
       });
     }
   }
@@ -696,26 +691,16 @@ export async function handleInboundImage({
     },
   });
   await bumpInboundCustomerActivity(customer.id);
-  await publish({
+  const userMsg = await prisma.message.findFirst({
+    where: { customerId: customer.id, businessId: business.id, type: 'USER' },
+    orderBy: { createdAt: 'desc' },
+  });
+  await publishInboxLive({
     businessId: business.id,
     customerId: customer.id,
-    conversationId: customer.id,
     type: EventType.MESSAGE_CREATED,
     reason: 'user_inbound_image',
-  });
-  await publish({
-    businessId: business.id,
-    customerId: customer.id,
-    conversationId: customer.id,
-    type: EventType.UNREAD_CHANGED,
-    reason: 'increment',
-  });
-  await publish({
-    businessId: business.id,
-    customerId: customer.id,
-    conversationId: customer.id,
-    type: EventType.SESSION_CHANGED,
-    reason: 'last_inbound',
+    message: userMsg,
   });
 
   return { ok: true };
@@ -796,26 +781,16 @@ export async function handleInboundNonText({
     },
   });
   await bumpInboundCustomerActivity(customer.id);
-  await publish({
+  const userMsg = await prisma.message.findFirst({
+    where: { customerId: customer.id, businessId: business.id, type: 'USER' },
+    orderBy: { createdAt: 'desc' },
+  });
+  await publishInboxLive({
     businessId: business.id,
     customerId: customer.id,
-    conversationId: customer.id,
     type: EventType.MESSAGE_CREATED,
     reason: 'user_inbound_media',
-  });
-  await publish({
-    businessId: business.id,
-    customerId: customer.id,
-    conversationId: customer.id,
-    type: EventType.UNREAD_CHANGED,
-    reason: 'increment',
-  });
-  await publish({
-    businessId: business.id,
-    customerId: customer.id,
-    conversationId: customer.id,
-    type: EventType.SESSION_CHANGED,
-    reason: 'last_inbound',
+    message: userMsg,
   });
 
   return { ok: true };

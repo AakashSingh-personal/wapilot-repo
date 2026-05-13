@@ -5,8 +5,12 @@ const THREAD_DEBOUNCE_MS = 280;
  *   loadThreads: () => void | Promise<void>,
  *   loadMessages: (customerId: string) => void | Promise<void>,
  *   getSelectedCustomerId: () => string | null,
+ *   hasActiveConversationFilters?: () => boolean,
+ *   applyWsInboxRow?: (row: Record<string, unknown>) => void,
+ *   applyWsMessage?: (msg: Record<string, unknown>, customerId: string) => void,
  *   onAgentTyping?: (evt: Record<string, unknown>) => void,
  *   onAgentViewing?: (evt: Record<string, unknown>) => void,
+ *   onAuthError?: (evt: Record<string, unknown>) => void,
  * }} ctx
  */
 export function createInboxEventHandler(ctx) {
@@ -32,7 +36,12 @@ export function createInboxEventHandler(ctx) {
   return (evt) => {
     if (!evt || typeof evt.type !== 'string') return;
 
-    if (evt.type === 'auth_ok' || evt.type === 'auth_error') return;
+    if (evt.type === 'auth_ok') return;
+
+    if (evt.type === 'auth_error') {
+      ctx.onAuthError?.(evt);
+      return;
+    }
 
     if (evt.type === 'agent_typing') {
       ctx.onAgentTyping?.(evt);
@@ -43,8 +52,33 @@ export function createInboxEventHandler(ctx) {
       return;
     }
 
-    scheduleThreads();
-    refreshOpenChatIfRelevant(evt);
+    const filtered =
+      typeof ctx.hasActiveConversationFilters === 'function' &&
+      ctx.hasActiveConversationFilters();
+
+    if (filtered) {
+      scheduleThreads();
+      refreshOpenChatIfRelevant(evt);
+      return;
+    }
+
+    if (evt.inboxRow && ctx.applyWsInboxRow) {
+      ctx.applyWsInboxRow(evt.inboxRow);
+    } else {
+      scheduleThreads();
+    }
+
+    const cid = (evt.customerId || evt.conversationId || null)?.toString?.() ?? null;
+    const selected = ctx.getSelectedCustomerId?.() ?? null;
+    if (selected && cid === selected) {
+      if (Array.isArray(evt.messages) && evt.messages.length) {
+        for (const m of evt.messages) {
+          ctx.applyWsMessage?.(m, cid);
+        }
+      } else if (evt.message) {
+        ctx.applyWsMessage?.(evt.message, cid);
+      }
+    }
   };
 }
 

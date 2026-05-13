@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import { publish } from '../realtime/publisher.js';
+import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
 import { fetchWhatsAppMediaById } from '../services/whatsapp.service.js';
 import { computeSessionStatus, computeMessageStatus } from '../utils/conversationStatus.js';
@@ -225,10 +225,9 @@ export async function messagesForCustomer(req, res, next) {
       data: { inboxUnreadCount: 0 },
     });
 
-    await publish({
+    await publishInboxLive({
       businessId: req.user.businessId,
       customerId,
-      conversationId: customerId,
       type: EventType.UNREAD_CHANGED,
       reason: 'cleared',
     });
@@ -280,10 +279,9 @@ export async function patchConversationAiControl(req, res, next) {
         where: { id: customerId, businessId },
         select: aiControlInclude,
       });
-      await publish({
+      await publishInboxLive({
         businessId,
         customerId,
-        conversationId: customerId,
         type: EventType.AI_CONTROL_CHANGED,
         reason: 'override',
       });
@@ -320,10 +318,9 @@ export async function patchConversationAiControl(req, res, next) {
         select: aiControlInclude,
       });
 
-      await publish({
+      await publishInboxLive({
         businessId,
         customerId,
-        conversationId: customerId,
         type: EventType.AI_CONTROL_CHANGED,
         reason: 'resume',
       });
