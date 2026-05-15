@@ -229,6 +229,7 @@ export default function Conversations() {
     if (!customerId) return;
     try {
       const { data } = await api.get(`/dashboard/messages/${customerId}`);
+      if (customerId !== selectedIdRef.current) return;
       const list = Array.isArray(data) ? data : data?.messages ?? [];
       setMessages(list);
       const ai = data && !Array.isArray(data) ? data.aiControl : null;
@@ -238,6 +239,7 @@ export default function Conversations() {
         );
       }
     } catch (e) {
+      if (customerId !== selectedIdRef.current) return;
       setError(e.response?.data?.error || 'Failed to load messages');
     }
   }, []);
@@ -378,9 +380,13 @@ export default function Conversations() {
         paramCustomerId && data.some((t) => t.id === paramCustomerId)
           ? paramCustomerId
           : data[0]?.id ?? null;
-      setSelectedId((prev) =>
-        prev && data.some((t) => t.id === prev) ? prev : preferred,
-      );
+      setSelectedId((prev) => {
+        if (paramCustomerId && data.some((t) => t.id === paramCustomerId)) {
+          return paramCustomerId;
+        }
+        if (prev && data.some((t) => t.id === prev)) return prev;
+        return preferred;
+      });
     })();
     return () => {
       cancelled = true;
@@ -402,6 +408,11 @@ export default function Conversations() {
       }
     }
   }, [threads, selectedId, paramCustomerId, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!paramCustomerId || !threads.some((t) => t.id === paramCustomerId)) return;
+    if (paramCustomerId !== selectedId) setSelectedId(paramCustomerId);
+  }, [paramCustomerId, threads, selectedId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -445,7 +456,11 @@ export default function Conversations() {
   }, []);
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId) {
+      setMessages([]);
+      return;
+    }
+    setMessages([]);
     setAiNotice('');
     loadMessages(selectedId);
   }, [selectedId, loadMessages]);
@@ -506,6 +521,9 @@ export default function Conversations() {
   }, []);
 
   function selectCustomer(id) {
+    if (id === selectedId) return;
+    setMessages([]);
+    setDraft('');
     setSelectedId(id);
     const next = new URLSearchParams(searchParams);
     next.set('customer', id);
@@ -839,6 +857,7 @@ export default function Conversations() {
             </div>
           ) : null}
           <div
+            key={selectedId ?? 'none'}
             ref={messagesContainerRef}
             className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/60 dark:bg-slate-950/40"
           >
