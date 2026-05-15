@@ -190,12 +190,14 @@ export async function buildTemplateContext({
       ? prisma.booking.findMany({
           where: { customerId, businessId },
           orderBy: { createdAt: 'desc' },
+          take: 20,
         })
       : [],
     customerId
       ? prisma.customerPayment.findMany({
           where: { customerId, businessId },
           orderBy: { createdAt: 'desc' },
+          take: 20,
         })
       : [],
   ]);

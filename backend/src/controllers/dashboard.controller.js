@@ -43,13 +43,16 @@ export async function stats(req, res, next) {
     const since = new Date();
     since.setDate(since.getDate() - 30);
 
-    const [leadCount, bookingCount, leadsInRange, paidCustomerTotal] = await Promise.all([
+    const [leadCount, bookingCount, leadsByDayRows, paidCustomerTotal] = await Promise.all([
       prisma.lead.count({ where: { businessId } }),
       prisma.booking.count({ where: { businessId } }),
-      prisma.lead.findMany({
-        where: { businessId, createdAt: { gte: since } },
-        select: { createdAt: true },
-      }),
+      prisma.$queryRaw`
+        SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS day, COUNT(*)::int AS count
+        FROM "Lead"
+        WHERE "businessId" = ${businessId}::uuid AND "createdAt" >= ${since}
+        GROUP BY 1
+        ORDER BY 1
+      `,
       prisma.customerPayment.aggregate({
         where: { businessId, status: 'PAID' },
         _sum: { amount: true },
@@ -58,19 +61,14 @@ export async function stats(req, res, next) {
 
     const revenue = Number(paidCustomerTotal._sum.amount || 0);
 
-    const leadsByDay = {};
-    for (const row of leadsInRange) {
-      const day = row.createdAt.toISOString().slice(0, 10);
-      leadsByDay[day] = (leadsByDay[day] || 0) + 1;
-    }
-
     res.json({
       leads: leadCount,
       bookings: bookingCount,
       revenue,
-      leadsOverTime: Object.entries(leadsByDay)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, count]) => ({ date, count })),
+      leadsOverTime: leadsByDayRows.map((row) => ({
+        date: row.day,
+        count: Number(row.count),
+      })),
     });
   } catch (e) {
     next(e);
@@ -79,9 +77,20 @@ export async function stats(req, res, next) {
 
 export async function listCustomers(req, res, next) {
   try {
+    const raw = Number(req.query.limit);
+    const limit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 1000) : 500;
     const customers = await prisma.customer.findMany({
       where: { businessId: req.user.businessId },
+      select: {
+        id: true,
+        phone: true,
+        name: true,
+        createdAt: true,
+        lastInboundCustomerMessageAt: true,
+        inboxUnreadCount: true,
+      },
       orderBy: { createdAt: 'desc' },
+      take: limit,
     });
     res.json(customers);
   } catch (e) {
@@ -98,80 +107,113 @@ export async function listConversations(req, res, next) {
     const businessId = req.user.businessId;
     const sessionFilter = parseCsvFilter(req.query.sessionStatus);
     const messageFilter = parseCsvFilter(req.query.messageStatus);
+    const hasFilters = Boolean(sessionFilter || messageFilter);
+    const sqlLimit = hasFilters ? 2000 : limit;
 
-    const statusRows = await prisma.$queryRaw`
-      WITH latest_out AS (
-        SELECT DISTINCT ON ("customerId") "customerId", content, "createdAt"
-        FROM "Message"
-        WHERE "businessId" = ${businessId}::uuid AND type IN ('BOT', 'STAFF')
-        ORDER BY "customerId", "createdAt" DESC
+    const dbRows = await prisma.$queryRaw`
+      WITH latest_msg AS (
+        SELECT DISTINCT ON (m."customerId")
+          m."customerId",
+          m.id AS msg_id,
+          m.content AS msg_content,
+          m.type::text AS msg_type,
+          m."createdAt" AS msg_created_at
+        FROM "Message" m
+        WHERE m."businessId" = ${businessId}::uuid
+        ORDER BY m."customerId", m."createdAt" DESC
+      ),
+      latest_out AS (
+        SELECT DISTINCT ON (m."customerId")
+          m."customerId",
+          m.content AS out_content,
+          m."createdAt" AS out_created_at
+        FROM "Message" m
+        WHERE m."businessId" = ${businessId}::uuid AND m.type IN ('BOT', 'STAFF')
+        ORDER BY m."customerId", m."createdAt" DESC
       )
-      SELECT lo."customerId", lo.content, lo."createdAt",
-        EXISTS (
-          SELECT 1 FROM "Message" u
-          WHERE u."businessId" = ${businessId}::uuid AND u."customerId" = lo."customerId"
-          AND u.type = 'USER' AND u."createdAt" > lo."createdAt"
-        ) AS replied
-      FROM latest_out lo
+      SELECT
+        c.id,
+        c.phone,
+        c.name,
+        c."createdAt",
+        c."lastInboundCustomerMessageAt",
+        c."inboxUnreadCount",
+        c."aiEnabled",
+        c."aiOverride",
+        c."aiOverrideAt",
+        c."aiResumeMode"::text AS "aiResumeMode",
+        c."aiOverrideByUserId",
+        lm.msg_id,
+        lm.msg_content,
+        lm.msg_type,
+        lm.msg_created_at,
+        lo.out_content,
+        lo.out_created_at,
+        CASE
+          WHEN lo.out_created_at IS NULL THEN false
+          ELSE EXISTS (
+            SELECT 1 FROM "Message" u
+            WHERE u."businessId" = ${businessId}::uuid
+              AND u."customerId" = c.id
+              AND u.type = 'USER'
+              AND u."createdAt" > lo.out_created_at
+          )
+        END AS replied
+      FROM "Customer" c
+      LEFT JOIN latest_msg lm ON lm."customerId" = c.id
+      LEFT JOIN latest_out lo ON lo."customerId" = c.id
+      WHERE c."businessId" = ${businessId}::uuid
+      ORDER BY COALESCE(lm.msg_created_at, c."createdAt") DESC
+      LIMIT ${sqlLimit}
     `;
 
-    const messageStatusByCustomer = new Map();
-    for (const row of statusRows) {
-      const cid = row.customerId;
-      messageStatusByCustomer.set(
-        cid,
-        computeMessageStatus({
-          latestOutboundContent: row.content,
-          latestOutboundAt: row.createdAt,
-          hasUserReplyAfter: Boolean(row.replied),
-        }),
-      );
-    }
+    const overrideUserIds = [
+      ...new Set(dbRows.map((r) => r.aiOverrideByUserId).filter(Boolean)),
+    ];
+    const overrideUsers =
+      overrideUserIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: overrideUserIds } },
+            select: { id: true, email: true },
+          })
+        : [];
+    const emailByUserId = new Map(overrideUsers.map((u) => [u.id, u.email]));
 
-    const customers = await prisma.customer.findMany({
-      where: { businessId },
-      select: {
-        id: true,
-        phone: true,
-        name: true,
-        createdAt: true,
-        lastInboundCustomerMessageAt: true,
-        inboxUnreadCount: true,
-        ...aiControlInclude,
-        messages: {
-          where: { businessId },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            id: true,
-            content: true,
-            type: true,
-            createdAt: true,
-          },
-        },
-      },
-    });
-
-    let rows = customers.map((c) => {
-      const last = c.messages[0];
-      const sessionStatus = computeSessionStatus(c.lastInboundCustomerMessageAt);
-      const messageStatus = messageStatusByCustomer.get(c.id) ?? null;
+    let rows = dbRows.map((row) => {
+      const sessionStatus = computeSessionStatus(row.lastInboundCustomerMessageAt);
+      const messageStatus = row.out_created_at
+        ? computeMessageStatus({
+            latestOutboundContent: row.out_content,
+            latestOutboundAt: row.out_created_at,
+            hasUserReplyAfter: Boolean(row.replied),
+          })
+        : null;
+      const aiCustomer = {
+        aiEnabled: row.aiEnabled,
+        aiOverride: row.aiOverride,
+        aiOverrideAt: row.aiOverrideAt,
+        aiResumeMode: row.aiResumeMode,
+        aiOverrideByUserId: row.aiOverrideByUserId,
+        aiOverrideBy: row.aiOverrideByUserId
+          ? { email: emailByUserId.get(row.aiOverrideByUserId) ?? null }
+          : null,
+      };
       return {
-        id: c.id,
-        phone: c.phone,
-        name: c.name,
-        createdAt: c.createdAt,
-        lastInboundCustomerMessageAt: c.lastInboundCustomerMessageAt,
-        inboxUnreadCount: c.inboxUnreadCount,
-        aiControl: mapCustomerAiControl(c),
+        id: row.id,
+        phone: row.phone,
+        name: row.name,
+        createdAt: row.createdAt,
+        lastInboundCustomerMessageAt: row.lastInboundCustomerMessageAt,
+        inboxUnreadCount: row.inboxUnreadCount,
+        aiControl: mapCustomerAiControl(aiCustomer),
         sessionStatus,
         messageStatus,
-        lastMessage: last
+        lastMessage: row.msg_id
           ? {
-              id: last.id,
-              content: last.content,
-              type: last.type,
-              createdAt: last.createdAt,
+              id: row.msg_id,
+              content: row.msg_content,
+              type: row.msg_type,
+              createdAt: row.msg_created_at,
             }
           : null,
       };
@@ -184,15 +226,7 @@ export async function listConversations(req, res, next) {
       rows = rows.filter((r) => r.messageStatus && messageFilter.has(r.messageStatus));
     }
 
-    rows.sort((a, b) => {
-      const ta = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
-      const tb = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
-      if (tb !== ta) return tb - ta;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-    rows = rows.slice(0, limit);
-
-    res.json(rows);
+    res.json(rows.slice(0, limit));
   } catch (e) {
     next(e);
   }
@@ -200,10 +234,15 @@ export async function listConversations(req, res, next) {
 
 export async function listLeads(req, res, next) {
   try {
+    const raw = Number(req.query.limit);
+    const limit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 500) : 200;
     const leads = await prisma.lead.findMany({
       where: { businessId: req.user.businessId },
-      include: { customer: true },
+      include: {
+        customer: { select: { id: true, phone: true, name: true } },
+      },
       orderBy: { createdAt: 'desc' },
+      take: limit,
     });
     res.json(leads);
   } catch (e) {
@@ -214,40 +253,44 @@ export async function listLeads(req, res, next) {
 export async function messagesForCustomer(req, res, next) {
   try {
     const { customerId } = req.params;
-    const existing = await prisma.customer.findFirst({
-      where: { id: customerId, businessId: req.user.businessId },
-      select: { id: true },
-    });
-    if (!existing) return res.status(404).json({ error: 'Customer not found' });
+    const businessId = req.user.businessId;
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 500) : 300;
 
-    await prisma.customer.updateMany({
-      where: { id: customerId, businessId: req.user.businessId },
-      data: { inboxUnreadCount: 0 },
+    const customerRow = await prisma.customer.findFirst({
+      where: { id: customerId, businessId },
+      select: { id: true, inboxUnreadCount: true, ...aiControlInclude },
     });
+    if (!customerRow) return res.status(404).json({ error: 'Customer not found' });
 
-    await publishInboxLive({
-      businessId: req.user.businessId,
-      customerId,
-      type: EventType.UNREAD_CHANGED,
-      reason: 'cleared',
+    const messagesPromise = prisma.message.findMany({
+      where: { businessId, customerId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
     });
 
-    const [messages, customerRow] = await Promise.all([
-      prisma.message.findMany({
-        where: {
-          businessId: req.user.businessId,
-          customerId,
-        },
-        orderBy: { createdAt: 'asc' },
-      }),
-      prisma.customer.findFirst({
-        where: { id: customerId, businessId: req.user.businessId },
-        select: aiControlInclude,
-      }),
-    ]);
+    const clearUnreadPromise =
+      customerRow.inboxUnreadCount > 0
+        ? prisma.customer.updateMany({
+            where: { id: customerId, businessId },
+            data: { inboxUnreadCount: 0 },
+          })
+        : Promise.resolve();
+
+    const [messagesDesc] = await Promise.all([messagesPromise, clearUnreadPromise]);
+
+    if (customerRow.inboxUnreadCount > 0) {
+      void publishInboxLive({
+        businessId,
+        customerId,
+        type: EventType.UNREAD_CHANGED,
+        reason: 'cleared',
+        inboxRow: { id: customerId, inboxUnreadCount: 0 },
+      });
+    }
 
     res.json({
-      messages,
+      messages: messagesDesc.reverse(),
       aiControl: mapCustomerAiControl(customerRow),
     });
   } catch (e) {
@@ -388,15 +431,18 @@ export async function listBookings(req, res, next) {
 
 export async function listPayments(req, res, next) {
   try {
-    const payments = await prisma.payment.findMany({
-      where: { businessId: req.user.businessId },
-      orderBy: { createdAt: 'desc' },
-    });
-    const customerPayments = await prisma.customerPayment.findMany({
-      where: { businessId: req.user.businessId },
-      include: { customer: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const businessId = req.user.businessId;
+    const [payments, customerPayments] = await Promise.all([
+      prisma.payment.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.customerPayment.findMany({
+        where: { businessId },
+        include: { customer: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
     res.json({ subscriptionPayments: payments, customerPayments });
   } catch (e) {
     next(e);

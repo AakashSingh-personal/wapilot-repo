@@ -148,6 +148,7 @@ model Customer {
 
   @@unique([businessId, phone])
   @@index([businessId])
+  @@index([businessId, lastInboundCustomerMessageAt(sort: Desc)])
 }
 
 model Lead {
@@ -161,6 +162,7 @@ model Lead {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
+  @@index([businessId, createdAt])
 }
 
 model Message {
@@ -176,6 +178,9 @@ model Message {
 
   @@index([businessId])
   @@index([customerId])
+  @@index([businessId, customerId, createdAt(sort: Desc)])
+  @@index([businessId, customerId, type, createdAt(sort: Desc)])
+  @@index([businessId, type, createdAt(sort: Desc)])
 }
 
 model Booking {
@@ -191,6 +196,7 @@ model Booking {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
+  @@index([businessId, customerId, createdAt(sort: Desc)])
 }
 
 model BusinessConfig {
@@ -250,6 +256,8 @@ model CustomerPayment {
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
+  @@index([businessId, customerId, status])
+  @@index([providerLinkId])
 }
 
 model Contact {
@@ -346,6 +354,7 @@ model CommunicationCampaign {
   walletTxns WalletTransaction[]
 
   @@index([businessId])
+  @@index([businessId, createdAt(sort: Desc)])
 }
 
 model Wallet {
@@ -373,4 +382,5 @@ model WalletTransaction {
 
   @@index([businessId])
   @@index([campaignId])
+  @@index([businessId, createdAt(sort: Desc)])
 }

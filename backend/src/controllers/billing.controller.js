@@ -120,22 +120,21 @@ export async function verifySubscriptionPayment(req, res, next) {
 
 export async function subscriptionStatus(req, res, next) {
   try {
-    const sub = await prisma.subscription.findFirst({
-      where: { businessId: req.user.businessId, status: 'ACTIVE' },
-      orderBy: { createdAt: 'desc' },
-    });
-    const pending = await prisma.payment.findFirst({
-      where: {
-        businessId: req.user.businessId,
-        type: 'SUBSCRIPTION',
-        status: 'PENDING',
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    const latest = await prisma.payment.findFirst({
-      where: { businessId: req.user.businessId, type: 'SUBSCRIPTION' },
-      orderBy: { createdAt: 'desc' },
-    });
+    const businessId = req.user.businessId;
+    const [sub, pending, latest] = await Promise.all([
+      prisma.subscription.findFirst({
+        where: { businessId, status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.payment.findFirst({
+        where: { businessId, type: 'SUBSCRIPTION', status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.payment.findFirst({
+        where: { businessId, type: 'SUBSCRIPTION' },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
     res.json({ subscription: sub, pendingPayment: pending, latestPayment: latest });
   } catch (e) {
     next(e);

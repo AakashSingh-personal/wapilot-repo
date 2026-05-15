@@ -25,12 +25,13 @@ export async function publishInboxLive(args) {
     reason,
     message,
     messages,
+    inboxRow: inboxRowArg,
     ...extra
   } = args;
   if (!businessId || !type) return;
 
-  let inboxRow = null;
-  if (customerId) {
+  let inboxRow = inboxRowArg ?? null;
+  if (!inboxRow && customerId) {
     try {
       inboxRow = await buildInboxRowForCustomer(businessId, customerId);
     } catch (e) {

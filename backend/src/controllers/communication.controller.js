@@ -12,6 +12,7 @@ import {
   razorpayPublicConfig,
   verifyRazorpayPaymentSignature,
 } from '../services/razorpay.service.js';
+import { getCachedMetaTemplates, setCachedMetaTemplates } from '../utils/templateListCache.js';
 
 const MESSAGE_COST_INR = Number(process.env.COMMUNICATION_COST_PER_MESSAGE || 2);
 
@@ -540,7 +541,11 @@ export async function listTemplates(req, res, next) {
     let metaTemplates = [];
     let metaSyncError = null;
     try {
-      metaTemplates = await listWhatsAppTemplates();
+      metaTemplates = getCachedMetaTemplates();
+      if (!metaTemplates) {
+        metaTemplates = await listWhatsAppTemplates();
+        setCachedMetaTemplates(metaTemplates);
+      }
       const byName = new Map(metaTemplates.map((t) => [t.name, t]));
       const localForSync = await prisma.template.findMany({
         where: { businessId: req.user.businessId },
