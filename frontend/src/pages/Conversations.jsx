@@ -582,9 +582,14 @@ export default function Conversations() {
       setShowCatalog(false);
       await Promise.allSettled([loadMessages(selectedId), loadThreads()]);
     } catch (e) {
+      const d = e.response?.data;
+      const failedRow = Array.isArray(d?.results)
+        ? d.results.find((r) => r.status === 'failed')
+        : null;
       setError(
-        e.response?.data?.error ||
-          'Template send failed — check wallet balance and WhatsApp configuration.',
+        failedRow?.error ||
+          d?.error ||
+          'Template send failed — check wallet balance, template approval, and WhatsApp configuration.',
       );
     }
     setLoadingSend(false);

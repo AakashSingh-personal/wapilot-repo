@@ -2,11 +2,19 @@ import { prisma } from '../lib/prisma.js';
 import { log } from '../utils/logger.js';
 import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
-import { sendWhatsAppText } from '../services/whatsapp.service.js';
 import { structuredContent } from '../utils/waStructuredMessage.js';
-import { createWhatsAppTemplate, listWhatsAppTemplates, updateWhatsAppTemplate } from '../services/whatsapp.service.js';
+import {
+  createWhatsAppTemplate,
+  listWhatsAppTemplates,
+  updateWhatsAppTemplate,
+  sendWhatsAppTemplate,
+  formatWhatsAppApiError,
+} from '../services/whatsapp.service.js';
 import { uploadBase64ToSupabase } from '../services/supabase.service.js';
-import { resolvePersonalizedTemplateText } from '../services/variableResolution.service.js';
+import {
+  resolvePersonalizedTemplateText,
+  resolveTemplateParameters,
+} from '../services/variableResolution.service.js';
 import {
   createRazorpayOrder,
   razorpayPublicConfig,
@@ -995,10 +1003,18 @@ export async function sendTemplateCommunication(req, res, next) {
       },
     });
 
+    const metaTemplateName = templateMetaLookupName(template, req.user.businessId);
+    const metaLanguage =
+      (template.metaSnapshot &&
+        typeof template.metaSnapshot === 'object' &&
+        template.metaSnapshot.language) ||
+      'en_US';
+
     let sentCount = 0;
     let failedCount = 0;
     let totalCharged = 0;
     const blocked = [];
+    const results = [];
 
     for (const target of targets) {
       const walletBefore = await prisma.wallet.findUnique({
@@ -1015,7 +1031,7 @@ export async function sendTemplateCommunication(req, res, next) {
         continue;
       }
 
-      const content = await resolvePersonalizedTemplateText({
+      const resolveOpts = {
         businessId: req.user.businessId,
         template,
         extraVariables: {
@@ -1026,7 +1042,25 @@ export async function sendTemplateCommunication(req, res, next) {
         customerId: target.customerId,
         contactName: target.name || null,
         contactPhone: target.phone || null,
-      });
+      };
+
+      let content;
+      let templateParams;
+      try {
+        [content, templateParams] = await Promise.all([
+          resolvePersonalizedTemplateText(resolveOpts),
+          resolveTemplateParameters(resolveOpts),
+        ]);
+      } catch (resolveErr) {
+        results.push({
+          phone: target.phone,
+          status: 'failed',
+          error: resolveErr.message || 'Could not resolve template variables',
+        });
+        failedCount += 1;
+        continue;
+      }
+
       try {
         // Debit before calling Meta so we never report "failed" after WhatsApp already accepted the message.
         const debited = await prisma.$transaction(async (tx) => {
@@ -1063,12 +1097,16 @@ export async function sendTemplateCommunication(req, res, next) {
 
         let sendRes;
         try {
-          sendRes = await sendWhatsAppText({
+          sendRes = await sendWhatsAppTemplate({
             phoneNumberId,
             toPhoneE164: target.phone,
-            body: content,
+            templateName: metaTemplateName,
+            languageCode: templateParams.languageCode || metaLanguage,
+            bodyParameters: templateParams.body,
+            headerParameters: templateParams.header,
           });
         } catch (sendErr) {
+          const errMsg = formatWhatsAppApiError(sendErr);
           await refundCommunicationCharge({
             businessId: req.user.businessId,
             campaignId: campaign.id,
@@ -1081,9 +1119,14 @@ export async function sendTemplateCommunication(req, res, next) {
             }),
           );
           log('warn', 'communications_send_whatsapp_failed', {
-            message: sendErr.message,
-            code: sendErr.code,
+            message: errMsg,
             phone: target.phone,
+            templateName: metaTemplateName,
+          });
+          results.push({
+            phone: target.phone,
+            status: 'failed',
+            error: errMsg,
           });
           failedCount += 1;
           continue;
@@ -1106,6 +1149,11 @@ export async function sendTemplateCommunication(req, res, next) {
             customerId: target.customerId,
             phone: target.phone,
             reason: 'WHATSAPP_NOT_CONFIGURED',
+          });
+          results.push({
+            phone: target.phone,
+            status: 'failed',
+            error: 'WhatsApp not configured (token or phone number id missing)',
           });
           failedCount += 1;
           continue;
@@ -1175,11 +1223,21 @@ export async function sendTemplateCommunication(req, res, next) {
         }
         sentCount += 1;
         totalCharged += MESSAGE_COST_INR;
+        results.push({
+          phone: target.phone,
+          status: 'sent',
+          waMessageId: waMessageId || null,
+        });
       } catch (loopErr) {
         log('warn', 'communications_send_iteration_failed', {
           message: loopErr.message,
           code: loopErr.code,
           phone: target.phone,
+        });
+        results.push({
+          phone: target.phone,
+          status: 'failed',
+          error: loopErr.message || 'Send failed',
         });
         failedCount += 1;
       }
@@ -1200,7 +1258,9 @@ export async function sendTemplateCommunication(req, res, next) {
     const wallet = await prisma.wallet.findUnique({ where: { businessId: req.user.businessId } });
 
     const c = updatedCampaign;
-    res.json({
+    const httpStatus = sentCount === 0 && targets.length > 0 ? 422 : 200;
+
+    res.status(httpStatus).json({
       campaign: {
         id: c.id,
         businessId: c.businessId,
@@ -1216,8 +1276,17 @@ export async function sendTemplateCommunication(req, res, next) {
       sentCount,
       failedCount,
       blocked,
+      results,
+      metaTemplateName,
       walletBalance: wallet ? Number(wallet.balance) : 0,
       messageCost: MESSAGE_COST_INR,
+      ...(sentCount === 0 && results.length
+        ? {
+            error:
+              results[0]?.error ||
+              'No messages were delivered. Check template approval, phone format (+country code), and WhatsApp configuration.',
+          }
+        : {}),
     });
   } catch (e) {
     log('error', 'communications_send_failed', {

@@ -983,17 +983,34 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         templateId: selectedTemplateId,
         contactIds,
       });
-      setError('');
       const fc = Number(data.failedCount) || 0;
       const sc = Number(data.sentCount) || 0;
-      setInfo(
-        fc > 0
-          ? `Sent: ${sc}, Failed: ${fc}, Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`
-          : `Delivered: ${sc}. Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`,
-      );
+      const failedRows = Array.isArray(data.results)
+        ? data.results.filter((r) => r.status === 'failed')
+        : [];
+      const detail =
+        failedRows[0]?.error ||
+        data.error ||
+        (Array.isArray(data.blocked) && data.blocked[0]?.reason) ||
+        null;
+      if (sc === 0 && fc > 0) {
+        setError(detail || 'No messages were delivered. Check template approval and phone numbers (+country code).');
+        setInfo('');
+      } else {
+        setError('');
+        setInfo(
+          fc > 0
+            ? `Sent: ${sc}, Failed: ${fc}${detail ? ` — ${detail}` : ''}. Wallet: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`
+            : `Delivered: ${sc}. Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`,
+        );
+      }
       await loadAll().catch(() => {});
     } catch (e) {
-      setError(e.response?.data?.error || 'Send failed');
+      const d = e.response?.data;
+      const failedRow = Array.isArray(d?.results)
+        ? d.results.find((r) => r.status === 'failed')
+        : null;
+      setError(failedRow?.error || d?.error || e.response?.data?.error || 'Send failed');
     } finally {
       setSending(false);
     }

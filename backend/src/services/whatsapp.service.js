@@ -19,8 +19,88 @@ function resolvePhoneNumberId(explicit) {
   return explicit || process.env.PHONE_NUMBER_ID || '';
 }
 
+export function formatWhatsAppApiError(e) {
+  const err = e?.response?.data?.error;
+  if (err?.message) {
+    return err.code ? `(${err.code}) ${err.message}` : err.message;
+  }
+  if (e?.response?.data) return JSON.stringify(e.response.data);
+  return e?.message || 'WhatsApp API error';
+}
+
 /**
- * Send WhatsApp text message.
+ * Send an approved WhatsApp template message (required outside the 24h session window).
+ */
+export async function sendWhatsAppTemplate({
+  phoneNumberId,
+  toPhoneE164,
+  templateName,
+  languageCode = 'en_US',
+  bodyParameters = [],
+  headerParameters = [],
+}) {
+  const pid = resolvePhoneNumberId(phoneNumberId);
+  const t = token();
+  if (!t || !pid) {
+    log('warn', 'whatsapp_template_send_skipped_no_config');
+    return { skipped: true };
+  }
+  if (!templateName) {
+    throw new Error('templateName is required for template send');
+  }
+
+  const components = [];
+  if (headerParameters.length) {
+    components.push({
+      type: 'header',
+      parameters: headerParameters.map((text) => ({
+        type: 'text',
+        text: String(text ?? ''),
+      })),
+    });
+  }
+  if (bodyParameters.length) {
+    components.push({
+      type: 'body',
+      parameters: bodyParameters.map((text) => ({
+        type: 'text',
+        text: String(text ?? ''),
+      })),
+    });
+  }
+
+  const url = `${GRAPH}/${pid}/messages`;
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: String(toPhoneE164).replace(/^\+/, ''),
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      ...(components.length ? { components } : {}),
+    },
+  };
+
+  try {
+    const res = await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${t}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    return res.data;
+  } catch (e) {
+    log('error', 'whatsapp_template_failed', {
+      templateName,
+      to: toPhoneE164,
+      message: formatWhatsAppApiError(e),
+    });
+    throw e;
+  }
+}
+
+/**
+ * Send WhatsApp text message (session messages only — within 24h of last customer message).
  */
 export async function sendWhatsAppText({ phoneNumberId, toPhoneE164, body }) {
   const pid = resolvePhoneNumberId(phoneNumberId);
