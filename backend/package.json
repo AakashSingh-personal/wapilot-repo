@@ -3,15 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "build": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@prisma/client": "6.19.2",
     "@supabase/supabase-js": "^2.105.3",
     "axios": "^1.9.0",
     "bcryptjs": "^3.0.2",
@@ -27,9 +32,6 @@
     "ws": "^8.20.1"
   },
   "devDependencies": {
-    "@prisma/client": "^7.8.0",
-    "i": "^0.3.7",
-    "npm": "^11.14.1",
-    "prisma": "^7.8.0"
+    "prisma": "6.19.2"
   }
 }

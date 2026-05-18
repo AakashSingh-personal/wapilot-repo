@@ -1,0 +1,14 @@
+# Render Blueprint (optional). In the dashboard, prefer these settings for the API service:
+# - Root Directory: backend
+# - Build Command: npm ci && npm run build
+# - Start Command: npm start
+services:
+  - type: web
+    name: wapilot-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
