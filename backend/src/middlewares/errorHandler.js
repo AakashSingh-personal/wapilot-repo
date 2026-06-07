@@ -2,7 +2,7 @@ import { log } from '../utils/logger.js';
 
 export function errorHandler(err, req, res, _next) {
   const isPayloadTooLarge = err?.status === 413 || err?.statusCode === 413 || err?.type === 'entity.too.large';
-  const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '25mb';
+  const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
 
   log('error', 'request_failed', {
     path: req.path,

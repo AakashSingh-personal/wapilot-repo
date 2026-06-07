@@ -39,12 +39,13 @@ export function createApp() {
   //   • Staff photo upload (base64 payload)  → 25 MB
   //   • Everything else                       →  1 MB (prevents unauthenticated memory exhaustion
   //                                              on public booking / rating endpoints)
-  const bigBodyJson  = express.json({ limit: process.env.STAFF_PHOTO_JSON_LIMIT || '25mb' });
+  const bigBodyJson  = express.json({ limit: process.env.MEDIA_JSON_LIMIT      || '25mb' });
   const defaultJson  = express.json({ limit: process.env.JSON_BODY_LIMIT       ||  '1mb' });
   app.use((req, res, next) => {
-    const isPhotoUpload =
-      req.method === 'POST' && /\/profile-picture\/upload$/.test(req.path);
-    return isPhotoUpload ? bigBodyJson(req, res, next) : defaultJson(req, res, next);
+    const isBigUpload =
+      req.method === 'POST' &&
+      (/\/profile-picture\/upload$/.test(req.path) || /\/media\/upload$/.test(req.path));
+    return isBigUpload ? bigBodyJson(req, res, next) : defaultJson(req, res, next);
   });
 
   app.use('/auth', authRoutes);
