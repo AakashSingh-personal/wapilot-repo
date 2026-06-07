@@ -69,6 +69,18 @@ export async function fetchRazorpayPaymentLink(linkId) {
   return client.paymentLink.fetch(linkId);
 }
 
+export async function fetchRazorpayPayment(paymentId) {
+  if (!paymentId) throw new Error('paymentId required');
+  const client = getRazorpayClient();
+  return client.payments.fetch(paymentId);
+}
+
+export async function fetchRazorpayOrderPayments(orderId) {
+  if (!orderId) throw new Error('orderId required');
+  const client = getRazorpayClient();
+  return client.orders.fetchPayments(orderId);
+}
+
 /** Quick sanity check that KEY_ID + KEY_SECRET belong together. */
 export async function verifyRazorpayCredentials() {
   try {

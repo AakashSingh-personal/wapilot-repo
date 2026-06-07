@@ -8,7 +8,7 @@ import {
   verifyRazorpayCredentials,
   verifyRazorpayPaymentSignature,
 } from '../services/razorpay.service.js';
-import { activateProSubscription } from '../services/subscriptionBilling.service.js';
+import { activateProSubscription, syncSubscriptionByRazorpayPaymentId, trySyncPendingSubscriptionPayment } from '../services/subscriptionBilling.service.js';
 
 function proAmount() {
   const raw = process.env.SUBSCRIPTION_PRO_AMOUNT || '999';
@@ -41,16 +41,24 @@ async function findReusableSubscriptionPayment(businessId) {
     if (ref.startsWith('plink_')) {
       const link = await fetchRazorpayPaymentLink(ref);
       if (link.status === 'created' && Number(link.amount) === proAmountPaise()) {
-        return { payment: pending, paymentLinkUrl: link.short_url, amount: amt, mode: 'payment_link' };
+        return {
+          paymentId: pending.id,
+          paymentLinkUrl: link.short_url,
+          amount: amt,
+          currency: link.currency || 'INR',
+          plan: 'PRO',
+          mode: 'payment_link',
+        };
       }
     } else if (ref.startsWith('order_')) {
       const order = await fetchRazorpayOrder(ref);
       if (order.status === 'created' && Number(order.amount) === proAmountPaise()) {
         return {
-          payment: pending,
+          paymentId: pending.id,
           orderId: order.id,
           amount: amt,
           currency: order.currency || 'INR',
+          plan: 'PRO',
           mode: 'checkout',
         };
       }
@@ -203,16 +211,40 @@ export async function markSubscriptionPaid(req, res, next) {
 
 export async function verifySubscriptionPayment(req, res, next) {
   try {
-    const { id } = req.params;
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+    let { id } = req.params;
+    const body = req.body || {};
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+    } = body;
+
+    if (!id || id === 'undefined') {
+      const pending = await prisma.payment.findFirst({
+        where: { businessId: req.user.businessId, type: 'SUBSCRIPTION', status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!pending) {
+        return res.status(400).json({ error: 'Invalid payment id and no pending subscription payment' });
+      }
+      id = pending.id;
+    }
+
+    if (razorpay_payment_id && !razorpay_signature) {
+      await syncSubscriptionByRazorpayPaymentId(req.user.businessId, razorpay_payment_id);
+      return res.json({ ok: true, synced: true });
+    }
+
     const payment = await prisma.payment.findFirst({
       where: { id, businessId: req.user.businessId },
     });
     if (!payment) return res.status(404).json({ error: 'Payment not found' });
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ error: 'Missing Razorpay payment verification fields' });
+      return res.status(400).json({
+        error: 'Missing Razorpay verification fields (order_id, payment_id, signature)',
+      });
     }
-    if (payment.providerOrderId && payment.providerOrderId !== razorpay_order_id) {
+    if (payment.providerOrderId?.startsWith('order_') && payment.providerOrderId !== razorpay_order_id) {
       return res.status(400).json({ error: 'Order id does not match this payment record' });
     }
     const valid = verifyRazorpayPaymentSignature({
@@ -230,6 +262,23 @@ export async function verifySubscriptionPayment(req, res, next) {
 
     res.json({ ok: true });
   } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function syncSubscriptionPayment(req, res, next) {
+  try {
+    const { razorpay_payment_id: razorpayPaymentId } = req.body || {};
+    if (razorpayPaymentId) {
+      await syncSubscriptionByRazorpayPaymentId(req.user.businessId, razorpayPaymentId);
+      return res.json({ ok: true, synced: true });
+    }
+    const result = await trySyncPendingSubscriptionPayment(req.user.businessId);
+    if (result.synced) return res.json({ ok: true, synced: true });
+    return res.json({ ok: false, synced: false, ...result });
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
     next(e);
   }
 }
@@ -237,6 +286,9 @@ export async function verifySubscriptionPayment(req, res, next) {
 export async function subscriptionStatus(req, res, next) {
   try {
     const businessId = req.user.businessId;
+
+    await trySyncPendingSubscriptionPayment(businessId);
+
     const [sub, pending, latest] = await Promise.all([
       prisma.subscription.findFirst({
         where: { businessId, status: 'ACTIVE' },

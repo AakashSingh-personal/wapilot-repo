@@ -26,6 +26,7 @@ router.patch(
   authMiddleware,
   billingController.verifySubscriptionPayment,
 );
+router.post('/billing/sync-payment', authMiddleware, billingController.syncSubscriptionPayment);
 
 router.patch('/customer-payments/:id/mark-paid', authMiddleware, requireOwner, async (req, res, next) => {
   try {

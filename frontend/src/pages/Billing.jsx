@@ -14,6 +14,21 @@ export default function Billing() {
     return data;
   }
 
+  async function syncPendingPayment() {
+    try {
+      const { data } = await api.post('/billing/sync-payment');
+      if (data?.synced) {
+        await refresh();
+        setMsg('Payment successful. PRO activated.');
+        setError('');
+        return true;
+      }
+    } catch {
+      // status poll will retry
+    }
+    return false;
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -33,6 +48,7 @@ export default function Billing() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
+        await api.post('/billing/sync-payment').catch(() => {});
         const data = await refresh();
         if (data?.subscription?.status === 'ACTIVE' || !data?.pendingPayment) {
           clearInterval(pollRef.current);
@@ -72,6 +88,13 @@ export default function Billing() {
       description: `Upgrade to ${data.plan}`,
       order_id: data.orderId,
       handler: async (resp) => {
+        if (!data.paymentId) {
+          const synced = await syncPendingPayment();
+          if (!synced) {
+            setError('Payment received but checkout session was stale — click Upgrade again or wait for auto-sync.');
+          }
+          return;
+        }
         try {
           await api.patch(`/billing/payments/${data.paymentId}/verify`, {
             razorpay_order_id: resp.razorpay_order_id,
@@ -81,7 +104,10 @@ export default function Billing() {
           await refresh();
           setMsg('Payment successful. PRO activated.');
         } catch (e) {
-          setError(e.response?.data?.error || 'Payment verification failed');
+          const synced = await syncPendingPayment();
+          if (!synced) {
+            setError(e.response?.data?.error || 'Payment verification failed');
+          }
         }
       },
       modal: {
