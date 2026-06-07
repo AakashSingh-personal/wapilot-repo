@@ -121,8 +121,9 @@ export async function listLocations(req, res, next) {
 
 export async function createLocation(req, res, next) {
   try {
-    const { code, name, timezone, addressLine1, city, phone } = req.body || {};
+    const { code, name, timezone, addressLine1, city, phone, mediaUrls } = req.body || {};
     if (!code || !name) return res.status(400).json({ error: 'code and name required' });
+    const urls = Array.isArray(mediaUrls) ? mediaUrls.filter(Boolean) : [];
     const row = await prisma.location.create({
       data: {
         businessId: tenant(req),
@@ -132,6 +133,8 @@ export async function createLocation(req, res, next) {
         addressLine1,
         city,
         phone,
+        mediaUrls: urls,
+        imageUrl: urls[0] || null,
       },
     });
     res.status(201).json(row);
@@ -147,16 +150,22 @@ export async function updateLocation(req, res, next) {
       where: { id: req.params.id, businessId: tenant(req), deletedAt: null },
     });
     if (!existing) return res.status(404).json({ error: 'Location not found' });
+    const updateData = {
+      name: body.name,
+      timezone: body.timezone,
+      addressLine1: body.addressLine1,
+      city: body.city,
+      phone: body.phone,
+      isActive: body.isActive,
+    };
+    if (body.mediaUrls !== undefined) {
+      const urls = Array.isArray(body.mediaUrls) ? body.mediaUrls.filter(Boolean) : [];
+      updateData.mediaUrls = urls;
+      updateData.imageUrl = urls[0] || null;
+    }
     const row = await prisma.location.update({
       where: { id: existing.id },
-      data: {
-        name: body.name,
-        timezone: body.timezone,
-        addressLine1: body.addressLine1,
-        city: body.city,
-        phone: body.phone,
-        isActive: body.isActive,
-      },
+      data: updateData,
     });
     res.json(row);
   } catch (e) {
@@ -431,6 +440,7 @@ export async function createService(req, res, next) {
         bufferAfter: b.bufferAfter ?? 0,
         maxCapacity: b.maxCapacity ?? 1,
         categoryId: b.categoryId || null,
+        imageUrl: b.imageUrl?.trim() || null,
         rebookingIntervalDays:
           b.rebookingIntervalDays != null ? Number(b.rebookingIntervalDays) : undefined,
       },
@@ -473,6 +483,7 @@ export async function updateService(req, res, next) {
         maxCapacity: b.maxCapacity,
         isActive: b.isActive,
         categoryId: b.categoryId !== undefined ? b.categoryId || null : undefined,
+        imageUrl: b.imageUrl !== undefined ? (b.imageUrl?.trim() || null) : undefined,
         rebookingIntervalDays:
           b.rebookingIntervalDays != null ? Number(b.rebookingIntervalDays) : undefined,
       },

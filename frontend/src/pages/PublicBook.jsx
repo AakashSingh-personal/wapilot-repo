@@ -3,10 +3,16 @@ import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
   Calendar, Clock, User, Phone, Mail, MapPin, FileText,
-  AlertCircle, CheckCircle2, Loader2, Users, ClipboardList,
+  AlertCircle, CheckCircle2, Loader2, Users, ClipboardList, Star,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 const baseURL = import.meta.env.VITE_API_URL ?? '';
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function isVideoUrl(url) {
+  return /\.(mp4|mov|webm|ogg|qt)(\?.*)?$/i.test(url || '');
+}
 
 // ── Shared styles ─────────────────────────────────────────────────────────
 const inputCls =
@@ -23,6 +29,208 @@ function Field({ icon: Icon, label, children }) {
       </label>
       {children}
     </div>
+  );
+}
+
+// ── Star rating display ───────────────────────────────────────────────────
+function StarRating({ value, max = 5, size = 'sm' }) {
+  const sz = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4';
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {Array.from({ length: max }).map((_, i) => (
+        <Star
+          key={i}
+          className={`${sz} ${i < Math.round(value) ? 'fill-amber-400 text-amber-400' : 'text-neutral-300 dark:text-neutral-600'}`}
+        />
+      ))}
+    </span>
+  );
+}
+
+// ── Reviews panel ─────────────────────────────────────────────────────────
+function ReviewsPanel({ reviews, avgRating, title }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!reviews || reviews.length === 0) return null;
+  const shown = expanded ? reviews : reviews.slice(0, 2);
+
+  return (
+    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 p-3 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">{title}</span>
+        {avgRating && (
+          <span className="flex items-center gap-1.5">
+            <StarRating value={avgRating} />
+            <span className="text-xs font-bold text-amber-600 dark:text-amber-400">{avgRating}</span>
+          </span>
+        )}
+      </div>
+      <div className="space-y-2">
+        {shown.map((r, i) => (
+          <div key={i} className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <StarRating value={r.rating} />
+              {r.customerName && (
+                <span className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">{r.customerName}</span>
+              )}
+            </div>
+            {r.feedback && (
+              <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed pl-0.5">&ldquo;{r.feedback}&rdquo;</p>
+            )}
+          </div>
+        ))}
+      </div>
+      {reviews.length > 2 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 hover:underline"
+        >
+          {expanded ? (
+            <><ChevronUp className="w-3.5 h-3.5" /> Show less</>
+          ) : (
+            <><ChevronDown className="w-3.5 h-3.5" /> Show {reviews.length - 2} more review{reviews.length - 2 !== 1 ? 's' : ''}</>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Location media strip + info ───────────────────────────────────────────
+function LocationPreview({ location }) {
+  const [activeIdx, setActiveIdx] = useState(0);
+  // Resolve media list: prefer mediaUrls array, fall back to imageUrl
+  const mediaList = (() => {
+    const arr = Array.isArray(location.mediaUrls) ? location.mediaUrls.filter(Boolean) : [];
+    if (arr.length > 0) return arr;
+    if (location.imageUrl) return [location.imageUrl];
+    return [];
+  })();
+
+  const hasMedia = mediaList.length > 0;
+  const activeUrl = mediaList[activeIdx] || null;
+
+  return (
+    <div className="rounded-xl border border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/40 overflow-hidden -mt-1">
+      {/* Main viewer */}
+      {hasMedia && activeUrl && (
+        <div className="relative w-full h-40 bg-neutral-900">
+          {isVideoUrl(activeUrl) ? (
+            <video
+              key={activeUrl}
+              src={activeUrl}
+              className="w-full h-full object-cover"
+              controls
+              playsInline
+              preload="metadata"
+            />
+          ) : (
+            <img
+              key={activeUrl}
+              src={activeUrl}
+              alt={location.name}
+              className="w-full h-full object-cover"
+            />
+          )}
+          {mediaList.length > 1 && (
+            <span className="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full">
+              {activeIdx + 1} / {mediaList.length}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Thumbnail strip (only when 2+ items) */}
+      {mediaList.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto px-3 py-2 scrollbar-hide">
+          {mediaList.map((url, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => setActiveIdx(idx)}
+              className={[
+                'shrink-0 rounded-lg overflow-hidden border-2 transition-all',
+                idx === activeIdx
+                  ? 'border-brand-500 shadow'
+                  : 'border-transparent opacity-60 hover:opacity-100',
+              ].join(' ')}
+            >
+              {isVideoUrl(url) ? (
+                <video
+                  src={url}
+                  className="w-14 h-14 object-cover"
+                  muted playsInline preload="metadata"
+                />
+              ) : (
+                <img src={url} alt={`${location.name} ${idx + 1}`} className="w-14 h-14 object-cover" />
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Info row */}
+      <div className="px-3 py-2 space-y-0.5">
+        {location.addressLine1 && (
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            📍 {[location.addressLine1, location.city].filter(Boolean).join(', ')}
+          </p>
+        )}
+        {location.phone && (
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">📞 {location.phone}</p>
+        )}
+      </div>
+
+      {/* Reviews */}
+      {location.reviews?.length > 0 && (
+        <div className="px-3 pb-3">
+          <ReviewsPanel
+            reviews={location.reviews}
+            avgRating={location.avgRating}
+            title="Branch reviews"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Staff profile card ────────────────────────────────────────────────────
+function StaffCard({ staff, selected, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(selected ? '' : staff.id)}
+      className={[
+        'flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 transition-all text-center w-full',
+        selected
+          ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/30 shadow-md'
+          : 'border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:border-brand-300 dark:hover:border-brand-700',
+      ].join(' ')}
+    >
+      {/* Avatar */}
+      {staff.profilePicture ? (
+        <img
+          src={staff.profilePicture}
+          alt={staff.name}
+          className="w-14 h-14 rounded-full object-cover border-2 border-white dark:border-neutral-800 shadow"
+        />
+      ) : (
+        <div className="w-14 h-14 rounded-full bg-brand-100 dark:bg-brand-900/40 flex items-center justify-center shadow border-2 border-white dark:border-neutral-800">
+          <User className="w-7 h-7 text-brand-500 dark:text-brand-400" />
+        </div>
+      )}
+      <span className="font-semibold text-xs text-neutral-900 dark:text-neutral-100 leading-tight">{staff.name}</span>
+      {staff.designation && (
+        <span className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-tight">{staff.designation}</span>
+      )}
+      {staff.avgRating && (
+        <span className="flex items-center gap-1 mt-0.5">
+          <StarRating value={staff.avgRating} size="sm" />
+          <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">{staff.avgRating}</span>
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -174,6 +382,8 @@ export default function PublicBook() {
 
   const businessName = catalog?.business?.name || 'Book appointment';
   const selectedService = catalog?.services?.find((s) => s.id === form.serviceId);
+  const selectedStaff = catalog?.staff?.find((s) => s.id === form.staffId);
+  const selectedLocation = catalog?.locations?.find((l) => l.id === form.locationId);
 
   // ── Booking confirmed ─────────────────────────────────────────────────────
   if (booked?.appointment) {
@@ -331,6 +541,7 @@ export default function PublicBook() {
             </p>
           )}
 
+          {/* Location picker */}
           <Field icon={MapPin} label="Location">
             <select
               className={selectCls}
@@ -346,22 +557,54 @@ export default function PublicBook() {
             </select>
           </Field>
 
+          {/* Selected location preview */}
+          {selectedLocation && (
+            <LocationPreview location={selectedLocation} />
+          )}
+
+          {/* Staff profile cards */}
           {(catalog?.staff || []).length > 0 && (
-            <Field icon={Users} label="Staff preference">
-              <select
-                className={selectCls}
-                value={form.staffId}
-                onChange={(e) => setForm((f) => ({ ...f, staffId: e.target.value }))}
-              >
-                <option value="">Any available staff</option>
+            <div className="space-y-2">
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+                <Users className="w-3.5 h-3.5" />
+                Staff preference
+              </label>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {/* "Any" option */}
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, staffId: '' }))}
+                  className={[
+                    'flex flex-col items-center gap-1.5 p-3 rounded-2xl border-2 transition-all text-center',
+                    !form.staffId
+                      ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/30 shadow-md'
+                      : 'border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:border-brand-300 dark:hover:border-brand-700',
+                  ].join(' ')}
+                >
+                  <div className="w-14 h-14 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center border-2 border-white dark:border-neutral-700 shadow">
+                    <Users className="w-6 h-6 text-neutral-400 dark:text-neutral-500" />
+                  </div>
+                  <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">Any</span>
+                </button>
                 {(catalog?.staff || []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.designation ? ` · ${s.designation}` : ''}
-                  </option>
+                  <StaffCard
+                    key={s.id}
+                    staff={s}
+                    selected={form.staffId === s.id}
+                    onSelect={(id) => setForm((f) => ({ ...f, staffId: id }))}
+                  />
                 ))}
-              </select>
-            </Field>
+              </div>
+            </div>
+          )}
+
+          {/* Selected staff reviews */}
+          {selectedStaff?.reviews?.length > 0 && (
+            <ReviewsPanel
+              reviews={selectedStaff.reviews}
+              avgRating={selectedStaff.avgRating}
+              title={`Reviews for ${selectedStaff.name}`}
+            />
           )}
 
           <Field icon={Calendar} label="Preferred date">

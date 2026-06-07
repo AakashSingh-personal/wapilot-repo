@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { IndianRupee, Link2, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { IndianRupee, Link2, ExternalLink, CheckCircle2, Clock } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Card } from '../components/ui/Card.jsx';
 import { PageHeader } from '../components/ui/PageHeader.jsx';
-import { Table } from '../components/ui/Table.jsx';
+import { DataTable } from '../components/ui/DataTable.jsx';
 import { Button } from '../components/ui/Button.jsx';
 import { Select } from '../components/ui/Select.jsx';
 import { Input } from '../components/ui/Input.jsx';
@@ -103,10 +103,10 @@ export default function Payments() {
         <div className="flex items-center gap-3">
           <Avatar name={p.customer?.name || p.customer?.phone} size="sm" />
           <div className="min-w-0">
-            <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
               {p.customer?.name || '—'}
             </p>
-            <p className="text-xs font-mono text-neutral-500 truncate">{p.customer?.phone}</p>
+            <p className="text-xs font-mono text-neutral-500 dark:text-neutral-400 truncate">{p.customer?.phone}</p>
           </div>
         </div>
       ),
@@ -114,9 +114,10 @@ export default function Payments() {
     {
       key: 'amount',
       label: 'Amount',
-      width: 110,
+      width: 120,
+      align: 'right',
       render: (p) => (
-        <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 tabular-nums">
+        <span className="text-sm font-bold text-neutral-900 dark:text-neutral-100 tabular-nums">
           {formatINR(p.amount)}
         </span>
       ),
@@ -124,34 +125,37 @@ export default function Payments() {
     {
       key: 'status',
       label: 'Status',
-      width: 110,
+      width: 120,
       render: (p) => <ApptPaymentStatusBadge status={p.status} />,
     },
     {
       key: 'createdAt',
       label: 'Created',
-      width: 130,
+      width: 140,
       render: (p) => (
-        <span className="text-xs text-neutral-500">
+        <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+          <Clock className="w-3 h-3 shrink-0" />
           {new Date(p.createdAt).toLocaleDateString(undefined, {
             month: 'short', day: 'numeric', year: 'numeric',
           })}
-        </span>
+        </div>
       ),
     },
     ...(ownersOnly ? [{
       key: 'actions',
       label: '',
-      width: 100,
+      width: 120,
       render: (p) => p.status === 'PENDING' ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          iconLeft={<CheckCircle2 className="w-3.5 h-3.5 text-success-500" />}
-          onClick={() => setModal({ type: 'confirm', id: p.id, amount: p.amount, name: p.customer?.name || p.customer?.phone })}
-        >
-          Mark paid
-        </Button>
+        <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button
+            variant="ghost"
+            size="sm"
+            iconLeft={<CheckCircle2 className="w-3.5 h-3.5 text-success-500" />}
+            onClick={() => setModal({ type: 'confirm', id: p.id, amount: p.amount, name: p.customer?.name || p.customer?.phone })}
+          >
+            Mark paid
+          </Button>
+        </div>
       ) : null,
     }] : []),
   ];
@@ -161,25 +165,28 @@ export default function Payments() {
       key: 'amount',
       label: 'Amount',
       render: (p) => (
-        <span className="text-sm font-semibold tabular-nums">{formatINR(p.amount)}</span>
+        <span className="text-sm font-bold tabular-nums text-neutral-900 dark:text-neutral-100">
+          {formatINR(p.amount)}
+        </span>
       ),
     },
     {
       key: 'status',
       label: 'Status',
-      width: 110,
+      width: 120,
       render: (p) => <ApptPaymentStatusBadge status={p.status} />,
     },
     {
       key: 'createdAt',
       label: 'Date',
-      width: 130,
+      width: 140,
       render: (p) => (
-        <span className="text-xs text-neutral-500">
+        <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+          <Clock className="w-3 h-3 shrink-0" />
           {new Date(p.createdAt).toLocaleDateString(undefined, {
             month: 'short', day: 'numeric', year: 'numeric',
           })}
-        </span>
+        </div>
       ),
     },
   ];
@@ -194,7 +201,7 @@ export default function Payments() {
         </div>
       )}
 
-      {/* Summary stats */}
+      {/* ── Summary stats ── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           title="Collected"
@@ -219,9 +226,12 @@ export default function Payments() {
         />
       </div>
 
-      {/* Create payment request */}
+      {/* ── Create payment request ── */}
       <Card>
-        <Card.Header title="Create payment request" subtitle="Generate a Razorpay link to send to a customer" />
+        <Card.Header
+          title="Create payment request"
+          subtitle="Generate a Razorpay link to send to a customer"
+        />
         <Card.Body>
           <div className="flex flex-wrap gap-3 items-end">
             <Select
@@ -257,29 +267,39 @@ export default function Payments() {
         </Card.Body>
       </Card>
 
-      {/* Customer payments table */}
+      {/* ── Customer payments table ── */}
       <Card>
-        <Card.Header title="Customer payments" />
-        <Table
+        <Card.Header
+          title="Customer payments"
+          subtitle={`${data.customerPayments?.length ?? 0} payment request${(data.customerPayments?.length ?? 0) !== 1 ? 's' : ''}`}
+        />
+        <DataTable
           columns={customerColumns}
           rows={data.customerPayments || []}
           loading={loading}
           skeletonRows={4}
+          striped
+          showRowCount={false}
         />
       </Card>
 
-      {/* Subscription payments table */}
+      {/* ── Subscription payments table ── */}
       <Card>
-        <Card.Header title="WaPilot subscription" subtitle="Your SaaS billing history" />
-        <Table
+        <Card.Header
+          title="WaPilot subscription"
+          subtitle="Your SaaS billing history"
+        />
+        <DataTable
           columns={subColumns}
           rows={data.subscriptionPayments || []}
           loading={loading}
           skeletonRows={2}
+          striped
+          showRowCount={false}
         />
       </Card>
 
-      {/* Confirm mark-paid modal */}
+      {/* ── Confirm mark-paid modal ── */}
       <Modal
         open={modal?.type === 'confirm'}
         onClose={() => setModal(null)}
@@ -307,7 +327,7 @@ export default function Payments() {
         </p>
       </Modal>
 
-      {/* Payment link modal */}
+      {/* ── Payment link modal ── */}
       <Modal
         open={modal?.type === 'link'}
         onClose={() => setModal(null)}

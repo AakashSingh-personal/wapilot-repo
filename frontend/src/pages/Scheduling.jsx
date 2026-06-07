@@ -11,6 +11,7 @@ const TABS = [
   { id: 'schedule', label: 'Schedule' },
   { id: 'staff', label: 'Staff' },
   { id: 'services', label: 'Services' },
+  { id: 'products', label: 'Products' },
   { id: 'locations', label: 'Locations' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'notifications', label: 'Notifications' },
@@ -54,6 +55,10 @@ function formatSourceLabel(source) {
     WAITLIST: 'Waitlist',
   };
   return labels[source] || String(source || 'Unknown').replace(/_/g, ' ');
+}
+
+function isVideoUrl(url) {
+  return /\.(mp4|mov|webm|ogg|qt)(\?.*)?$/i.test(url || '');
 }
 
 function todayDateInput() {
@@ -122,6 +127,12 @@ export default function Scheduling() {
     profilePicture: '',
   });
   const [staffPhotoUploading, setStaffPhotoUploading] = useState(false);
+  const [serviceImageUploading, setServiceImageUploading] = useState(false);
+  const [locationImageUploading, setLocationImageUploading] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [productForm, setProductForm] = useState({ name: '', price: '', description: '', imageUrl: '' });
+  const [productImageUploading, setProductImageUploading] = useState(false);
+  const [editingProductIdx, setEditingProductIdx] = useState(-1);
   const [editingStaffId, setEditingStaffId] = useState('');
   const [serviceForm, setServiceForm] = useState({
     code: '',
@@ -132,6 +143,7 @@ export default function Scheduling() {
     bufferAfter: 0,
     rebookingIntervalDays: '',
     categoryId: '',
+    imageUrl: '',
   });
   const [categories, setCategories] = useState([]);
   const [categoryForm, setCategoryForm] = useState({ name: '', sortOrder: 0 });
@@ -149,6 +161,7 @@ export default function Scheduling() {
     addressLine1: '',
     city: '',
     phone: '',
+    mediaUrls: [],
   });
   const [editingLocationId, setEditingLocationId] = useState('');
   const [selectedApptId, setSelectedApptId] = useState('');
@@ -424,6 +437,13 @@ export default function Scheduling() {
       .then(({ data }) => setRecentRatings(Array.isArray(data) ? data : []))
       .catch(() => setRecentRatings([]));
   }, [tab, analyticsDays]);
+
+  useEffect(() => {
+    if (tab !== 'products') return;
+    api.get('/config')
+      .then(({ data }) => setProducts(Array.isArray(data.config?.products) ? data.config.products : []))
+      .catch(() => setProducts([]));
+  }, [tab]);
 
   useEffect(() => {
     if (selectedStaffId) void loadAvailRules(selectedStaffId);
@@ -713,6 +733,7 @@ export default function Scheduling() {
         bufferAfter: 0,
         rebookingIntervalDays: '',
         categoryId: '',
+        imageUrl: '',
       });
       await loadAll();
     } catch (err) {
@@ -731,6 +752,7 @@ export default function Scheduling() {
       bufferAfter: service.bufferAfter ?? 0,
       rebookingIntervalDays: service.rebookingIntervalDays ?? '',
       categoryId: service.categoryId || service.category?.id || '',
+      imageUrl: service.imageUrl || '',
     });
   }
 
@@ -745,7 +767,95 @@ export default function Scheduling() {
       bufferAfter: 0,
       rebookingIntervalDays: '',
       categoryId: '',
+      imageUrl: '',
     });
+  }
+
+  async function uploadServiceImage(file) {
+    if (!file) return;
+    setServiceImageUploading(true);
+    try {
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('File read failed'));
+        reader.readAsDataURL(file);
+      });
+      const { data } = await api.post('/media/upload', {
+        base64Data,
+        mimeType: file.type || 'image/jpeg',
+        fileName: file.name,
+      });
+      setServiceForm((f) => ({ ...f, imageUrl: data.publicUrl || '' }));
+      setInfo('Image uploaded');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Image upload failed');
+    } finally {
+      setServiceImageUploading(false);
+    }
+  }
+
+  async function uploadProductImage(file, onDone) {
+    if (!file) return;
+    setProductImageUploading(true);
+    try {
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('File read failed'));
+        reader.readAsDataURL(file);
+      });
+      const { data } = await api.post('/media/upload', {
+        base64Data,
+        mimeType: file.type || 'image/jpeg',
+        fileName: file.name,
+      });
+      onDone(data.publicUrl || '');
+      setInfo('Image uploaded');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Image upload failed');
+    } finally {
+      setProductImageUploading(false);
+    }
+  }
+
+  async function uploadLocationMedia(file) {
+    if (!file) return;
+    setLocationImageUploading(true);
+    try {
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('File read failed'));
+        reader.readAsDataURL(file);
+      });
+      const { data } = await api.post('/media/upload', {
+        base64Data,
+        mimeType: file.type || 'image/jpeg',
+        fileName: file.name,
+      });
+      const url = data.publicUrl || '';
+      if (url) setLocationForm((f) => ({ ...f, mediaUrls: [...(f.mediaUrls || []), url] }));
+      setInfo('Media uploaded');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Upload failed');
+    } finally {
+      setLocationImageUploading(false);
+    }
+  }
+
+  function removeLocationMedia(idx) {
+    setLocationForm((f) => ({ ...f, mediaUrls: (f.mediaUrls || []).filter((_, i) => i !== idx) }));
+  }
+
+  async function saveProducts(updatedProducts) {
+    try {
+      await api.put('/config', { products: updatedProducts });
+      setProducts(updatedProducts);
+      setInfo('Products saved');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not save products');
+    }
   }
 
   async function saveCategory(e) {
@@ -1035,6 +1145,9 @@ export default function Scheduling() {
 
   function startEditLocation(loc) {
     setEditingLocationId(loc.id);
+    // Back-compat: if loc has imageUrl but no mediaUrls, seed from imageUrl
+    let urls = Array.isArray(loc.mediaUrls) ? loc.mediaUrls : [];
+    if (urls.length === 0 && loc.imageUrl) urls = [loc.imageUrl];
     setLocationForm({
       code: loc.code || '',
       name: loc.name || '',
@@ -1042,6 +1155,7 @@ export default function Scheduling() {
       addressLine1: loc.addressLine1 || '',
       city: loc.city || '',
       phone: loc.phone || '',
+      mediaUrls: urls,
     });
   }
 
@@ -1054,6 +1168,7 @@ export default function Scheduling() {
       addressLine1: '',
       city: '',
       phone: '',
+      mediaUrls: [],
     });
   }
 
@@ -1067,11 +1182,20 @@ export default function Scheduling() {
           addressLine1: locationForm.addressLine1 || null,
           city: locationForm.city || null,
           phone: locationForm.phone || null,
+          mediaUrls: locationForm.mediaUrls || [],
         });
         setInfo('Location updated');
         cancelEditLocation();
       } else {
-        await api.post('/scheduling/locations', locationForm);
+        await api.post('/scheduling/locations', {
+          code: locationForm.code,
+          name: locationForm.name,
+          timezone: locationForm.timezone,
+          addressLine1: locationForm.addressLine1 || null,
+          city: locationForm.city || null,
+          phone: locationForm.phone || null,
+          mediaUrls: locationForm.mediaUrls || [],
+        });
         setInfo('Location created');
         cancelEditLocation();
       }
@@ -1776,43 +1900,64 @@ export default function Scheduling() {
                 )}
               </div>
             </form>
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2">
-              <div className="font-semibold mb-2">Team</div>
-              <ul className="space-y-2 text-sm">
-                {staff.map((s) => (
-                  <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                    <span className="flex items-center gap-2">
-                      {s.profilePicture && (
-                        <img src={s.profilePicture} alt="" className="h-8 w-8 rounded-full object-cover" />
+            <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+              <div className="px-4 py-3 bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700 flex items-center gap-2">
+                <span className="font-semibold text-sm text-neutral-900 dark:text-neutral-100">Team</span>
+                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-bold">{staff.length}</span>
+              </div>
+              <ul className="text-sm">
+                {staff.map((s, i) => (
+                  <li key={s.id} className={[
+                    'group flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                    i % 2 === 1 ? 'bg-neutral-50/40 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                    'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                  ].join(' ')}>
+                    <span className="flex items-center gap-3">
+                      {s.profilePicture ? (
+                        <img src={s.profilePicture} alt="" className="h-8 w-8 rounded-full object-cover ring-2 ring-neutral-200 dark:ring-neutral-700" />
+                      ) : (
+                        <div className="h-8 w-8 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                          {(s.name || '?').charAt(0).toUpperCase()}
+                        </div>
                       )}
                       <span>
-                        {s.name} ({s.staffCode}){s.designation ? ` · ${s.designation}` : ''}
-                        {s.department ? ` · ${s.department}` : ''}
+                        <span className="font-semibold text-neutral-900 dark:text-neutral-100">{s.name}</span>
+                        <span className="ml-1.5 font-mono text-xs text-neutral-500 dark:text-neutral-400">({s.staffCode})</span>
+                        {(s.designation || s.department) && (
+                          <span className="text-xs text-neutral-500 dark:text-neutral-400 ml-1.5">
+                            {[s.designation, s.department].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
                         {s.activeStatus === 'INACTIVE' && (
-                          <span className="ml-2 text-xs text-amber-600">Inactive</span>
+                          <span className="ml-2 inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold bg-warning-50 text-warning-700 dark:bg-warning-950/40 dark:text-warning-400">Inactive</span>
+                        )}
+                        {s.activeStatus === 'ARCHIVED' && (
+                          <span className="ml-2 inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">Archived</span>
                         )}
                       </span>
                     </span>
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       {s.activeStatus !== 'ARCHIVED' && (
                         <button
                           type="button"
-                          className="text-xs font-semibold text-slate-600"
+                          className="px-2 py-1 rounded-lg text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
                           onClick={() => toggleStaffActive(s)}
                         >
                           {s.activeStatus === 'ACTIVE' ? 'Deactivate' : 'Activate'}
                         </button>
                       )}
-                      <button type="button" className="text-xs font-semibold text-brand-600" onClick={() => startEditStaff(s)}>
+                      <button type="button" className="px-2 py-1 rounded-lg text-xs font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors" onClick={() => startEditStaff(s)}>
                         Edit
                       </button>
-                      <button type="button" className="text-xs font-semibold text-red-600" onClick={() => archiveStaff(s)}>
+                      <button type="button" className="px-2 py-1 rounded-lg text-xs font-semibold text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-950/30 transition-colors" onClick={() => archiveStaff(s)}>
                         Archive
                       </button>
                     </div>
                   </li>
                 ))}
-                {!staff.length && <li className="text-slate-500">No staff yet.</li>}
+                {!staff.length && (
+                  <li className="px-4 py-10 text-center text-neutral-400 dark:text-neutral-500 text-sm">No staff yet. Create one above.</li>
+                )}
               </ul>
             </div>
             <StaffAssignmentsPanel
@@ -1907,30 +2052,38 @@ export default function Scheduling() {
               )}
             </div>
           </form>
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2">
-            <div className="font-semibold mb-2">Categories</div>
-            <ul className="space-y-2 text-sm">
-              {categories.map((c) => (
-                <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <span>{c.name} · {c._count?.services ?? 0} services</span>
-                  <span className="flex gap-2">
+          <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+            <div className="px-4 py-3 bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700 flex items-center gap-2">
+              <span className="font-semibold text-sm text-neutral-900 dark:text-neutral-100">Categories</span>
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-bold">{categories.length}</span>
+            </div>
+            <ul className="text-sm">
+              {categories.map((c, i) => (
+                <li key={c.id} className={[
+                  'group flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                  i % 2 === 1 ? 'bg-neutral-50/40 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                  'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                ].join(' ')}>
+                  <span>
+                    <span className="font-medium text-neutral-900 dark:text-neutral-100">{c.name}</span>
+                    <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-[11px] font-bold">{c._count?.services ?? 0}</span>
+                    <span className="ml-1 text-xs text-neutral-400 dark:text-neutral-500">service{(c._count?.services ?? 0) !== 1 ? 's' : ''}</span>
+                  </span>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       type="button"
-                      className="text-xs font-semibold text-brand-600"
-                      onClick={() => {
-                        setEditingCategoryId(c.id);
-                        setCategoryForm({ name: c.name, sortOrder: c.sortOrder ?? 0 });
-                      }}
+                      className="px-2 py-1 rounded-lg text-xs font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
+                      onClick={() => { setEditingCategoryId(c.id); setCategoryForm({ name: c.name, sortOrder: c.sortOrder ?? 0 }); }}
                     >
                       Edit
                     </button>
-                    <button type="button" className="text-xs font-semibold text-red-600" onClick={() => deleteCategory(c.id)}>
+                    <button type="button" className="px-2 py-1 rounded-lg text-xs font-semibold text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-950/30 transition-colors" onClick={() => deleteCategory(c.id)}>
                       Delete
                     </button>
-                  </span>
+                  </div>
                 </li>
               ))}
-              {!categories.length && <li className="text-slate-500">No categories yet.</li>}
+              {!categories.length && <li className="px-4 py-8 text-center text-neutral-400 dark:text-neutral-500 text-sm">No categories yet.</li>}
             </ul>
           </div>
         </div>
@@ -1960,6 +2113,33 @@ export default function Scheduling() {
               onChange={(e) => setServiceForm((f) => ({ ...f, rebookingIntervalDays: e.target.value }))}
             />
             <p className="text-xs text-slate-500">Used by AI rebooking campaigns — e.g. 30 for monthly touch-ups.</p>
+            {/* Service media */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Service photo / video (optional)</p>
+              <div className="flex items-center gap-3 flex-wrap">
+                {serviceForm.imageUrl && (
+                  isVideoUrl(serviceForm.imageUrl) ? (
+                    <video
+                      src={serviceForm.imageUrl}
+                      className="h-14 w-14 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
+                      muted playsInline preload="metadata"
+                    />
+                  ) : (
+                    <img src={serviceForm.imageUrl} alt="Service preview" className="h-14 w-14 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0" />
+                  )
+                )}
+                <label className={[
+                  'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-600 text-xs font-medium cursor-pointer transition-colors',
+                  serviceImageUploading ? 'opacity-50 pointer-events-none' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800',
+                ].join(' ')}>
+                  {serviceImageUploading ? '⏳ Uploading…' : '📎 Upload photo / video'}
+                  <input type="file" accept="image/*,video/mp4,video/quicktime,video/webm" className="hidden" onChange={(e) => uploadServiceImage(e.target.files?.[0])} disabled={serviceImageUploading} />
+                </label>
+                {serviceForm.imageUrl && (
+                  <button type="button" className="text-xs text-error-500 hover:text-error-700 transition-colors" onClick={() => setServiceForm((f) => ({ ...f, imageUrl: '' }))}>Remove</button>
+                )}
+              </div>
+            </div>
             <div className="flex gap-2">
               <button type="submit" className="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-semibold">
                 {editingServiceId ? 'Save changes' : 'Create'}
@@ -1971,34 +2151,215 @@ export default function Scheduling() {
               )}
             </div>
           </form>
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2">
-            <div className="font-semibold mb-2">Services</div>
-            <ul className="space-y-2 text-sm">
-              {services.map((s) => (
-                <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <span>
-                    {s.category?.name ? `${s.category.name} · ` : ''}{s.name} · {s.durationMin}m · ₹{s.price}
-                    {!s.isActive ? ' · inactive' : ''}
-                    {s.rebookingIntervalDays ? ` · rebook every ${s.rebookingIntervalDays}d` : ''}
-                  </span>
-                  <span className="flex gap-2">
-                    <button type="button" className="text-xs font-semibold text-brand-600" onClick={() => startEditService(s)}>
+          <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+            <div className="px-4 py-3 bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700 flex items-center gap-2">
+              <span className="font-semibold text-sm text-neutral-900 dark:text-neutral-100">Services</span>
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-bold">{services.length}</span>
+            </div>
+            <ul className="text-sm">
+              {services.map((s, i) => (
+                <li key={s.id} className={[
+                  'group flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                  i % 2 === 1 ? 'bg-neutral-50/40 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                  'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                ].join(' ')}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    {s.imageUrl ? (
+                      isVideoUrl(s.imageUrl) ? (
+                        <video src={s.imageUrl} className="h-10 w-10 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700 shrink-0" muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={s.imageUrl} alt={s.name} className="h-10 w-10 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700 shrink-0" />
+                      )
+                    ) : (
+                      <div className="h-10 w-10 rounded-lg bg-brand-50 dark:bg-brand-950/40 flex items-center justify-center shrink-0 text-brand-400 text-xs font-bold border border-brand-100 dark:border-brand-900">{s.name.charAt(0).toUpperCase()}</div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-neutral-900 dark:text-neutral-100">{s.name}</span>
+                        {s.category?.name && (
+                          <span className="text-xs text-neutral-400 dark:text-neutral-500">in {s.category.name}</span>
+                        )}
+                        {!s.isActive && (
+                          <span className="inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold bg-warning-50 text-warning-700 dark:bg-warning-950/40 dark:text-warning-400">Inactive</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                        <span>⏱ {s.durationMin}m</span>
+                        <span className="font-semibold text-emerald-700 dark:text-emerald-400">₹{Number(s.price).toLocaleString('en-IN')}</span>
+                        {s.rebookingIntervalDays && <span>↩ every {s.rebookingIntervalDays}d</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button type="button" className="px-2 py-1 rounded-lg text-xs font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors" onClick={() => startEditService(s)}>
                       Edit
                     </button>
                     <button
                       type="button"
-                      className="text-xs font-semibold text-slate-600"
+                      className="px-2 py-1 rounded-lg text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
                       onClick={() => toggleServiceActive(s.id, !s.isActive)}
                     >
                       {s.isActive === false ? 'Activate' : 'Deactivate'}
                     </button>
-                  </span>
+                  </div>
                 </li>
               ))}
-              {!services.length && <li className="text-slate-500">No services yet.</li>}
+              {!services.length && <li className="px-4 py-8 text-center text-neutral-400 dark:text-neutral-500 text-sm">No services yet.</li>}
             </ul>
           </div>
         </div>
+        </div>
+      ) : tab === 'products' ? (
+        <div className="space-y-6">
+          <div className="grid lg:grid-cols-2 gap-6">
+            {/* Product form */}
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-3">
+              <div className="font-semibold text-neutral-900 dark:text-neutral-100">
+                {editingProductIdx >= 0 ? 'Edit product' : 'Add product'}
+              </div>
+              <input
+                placeholder="Product name *"
+                className="w-full rounded-xl border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                value={productForm.name}
+                onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))}
+              />
+              <input
+                placeholder="Price (e.g. ₹499)"
+                className="w-full rounded-xl border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                value={productForm.price}
+                onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))}
+              />
+              <textarea
+                rows={2}
+                placeholder="Description (optional)"
+                className="w-full rounded-xl border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                value={productForm.description}
+                onChange={(e) => setProductForm((f) => ({ ...f, description: e.target.value }))}
+              />
+              {/* Media upload */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">Product photo / video (optional)</p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  {productForm.imageUrl && (
+                    isVideoUrl(productForm.imageUrl) ? (
+                      <video
+                        src={productForm.imageUrl}
+                        className="h-14 w-14 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0"
+                        muted playsInline preload="metadata"
+                      />
+                    ) : (
+                      <img src={productForm.imageUrl} alt="Product preview" className="h-14 w-14 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700 shrink-0" />
+                    )
+                  )}
+                  <label className={[
+                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-300 dark:border-neutral-600 text-xs font-medium cursor-pointer transition-colors',
+                    productImageUploading ? 'opacity-50 pointer-events-none' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800',
+                  ].join(' ')}>
+                    {productImageUploading ? '⏳ Uploading…' : '📎 Upload photo / video'}
+                    <input
+                      type="file"
+                      accept="image/*,video/mp4,video/quicktime,video/webm"
+                      className="hidden"
+                      disabled={productImageUploading}
+                      onChange={(e) => uploadProductImage(e.target.files?.[0], (url) => setProductForm((f) => ({ ...f, imageUrl: url })))}
+                    />
+                  </label>
+                  {productForm.imageUrl && (
+                    <button type="button" className="text-xs text-error-500 hover:text-error-700 transition-colors" onClick={() => setProductForm((f) => ({ ...f, imageUrl: '' }))}>Remove</button>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-semibold hover:bg-brand-700 transition-colors"
+                  onClick={() => {
+                    if (!productForm.name.trim()) { setError('Product name is required'); return; }
+                    let updated;
+                    if (editingProductIdx >= 0) {
+                      updated = products.map((p, i) => i === editingProductIdx ? { ...productForm } : p);
+                    } else {
+                      updated = [...products, { ...productForm }];
+                    }
+                    saveProducts(updated);
+                    setProductForm({ name: '', price: '', description: '', imageUrl: '' });
+                    setEditingProductIdx(-1);
+                  }}
+                >
+                  {editingProductIdx >= 0 ? 'Save changes' : 'Add product'}
+                </button>
+                {editingProductIdx >= 0 && (
+                  <button
+                    type="button"
+                    className="rounded-xl border border-neutral-300 dark:border-neutral-600 px-4 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+                    onClick={() => { setEditingProductIdx(-1); setProductForm({ name: '', price: '', description: '', imageUrl: '' }); }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Products list */}
+            <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+              <div className="px-4 py-3 bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700 flex items-center gap-2">
+                <span className="font-semibold text-sm text-neutral-900 dark:text-neutral-100">Products</span>
+                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-bold">{products.length}</span>
+              </div>
+              <ul className="text-sm divide-y divide-neutral-100 dark:divide-neutral-800/60">
+                {products.map((p, i) => (
+                  <li key={i} className={[
+                    'group flex items-center justify-between gap-3 px-4 py-3.5 transition-colors',
+                    i % 2 === 1 ? 'bg-neutral-50/40 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                    'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                  ].join(' ')}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {p.imageUrl ? (
+                        isVideoUrl(p.imageUrl) ? (
+                          <video src={p.imageUrl} className="h-10 w-10 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700 shrink-0" muted playsInline preload="metadata" />
+                        ) : (
+                          <img src={p.imageUrl} alt={p.name} className="h-10 w-10 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700 shrink-0" />
+                        )
+                      ) : (
+                        <div className="h-10 w-10 rounded-lg bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center shrink-0 text-neutral-400 text-xs font-bold border border-neutral-200 dark:border-neutral-700">{(p.name || '?').charAt(0).toUpperCase()}</div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-semibold text-neutral-900 dark:text-neutral-100 truncate">{p.name}</div>
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                          {p.price && <span className="font-semibold text-emerald-700 dark:text-emerald-400">{p.price}</span>}
+                          {p.description && <span className="truncate">{p.description}</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded-lg text-xs font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
+                        onClick={() => { setEditingProductIdx(i); setProductForm({ name: p.name || '', price: p.price || '', description: p.description || '', imageUrl: p.imageUrl || '' }); }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="px-2 py-1 rounded-lg text-xs font-semibold text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-950/30 transition-colors"
+                        onClick={() => saveProducts(products.filter((_, idx) => idx !== i))}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                ))}
+                {!products.length && (
+                  <li className="px-4 py-10 text-center text-neutral-400 dark:text-neutral-500 text-sm">
+                    No products yet. Add your first product.
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
+          <p className="text-xs text-neutral-400 dark:text-neutral-500">
+            Products are shared with the AI assistant. When a customer asks about products, the AI will mention the name and price, and send the image if available.
+          </p>
         </div>
       ) : tab === 'locations' ? (
         <div className="grid lg:grid-cols-2 gap-6">
@@ -2012,6 +2373,63 @@ export default function Scheduling() {
               <input placeholder="City" className="w-full rounded-xl border px-3 py-2 text-sm" value={locationForm.city} onChange={(e) => setLocationForm((f) => ({ ...f, city: e.target.value }))} />
               <input placeholder="Phone" className="w-full rounded-xl border px-3 py-2 text-sm" value={locationForm.phone} onChange={(e) => setLocationForm((f) => ({ ...f, phone: e.target.value }))} />
             </div>
+            {/* Location media gallery */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+                Photos / Videos ({(locationForm.mediaUrls || []).length})
+              </div>
+              {(locationForm.mediaUrls || []).length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {(locationForm.mediaUrls || []).map((url, idx) => (
+                    <div key={idx} className="relative group">
+                      {isVideoUrl(url) ? (
+                        <video
+                          src={url}
+                          className="h-20 w-20 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700"
+                          muted playsInline preload="metadata"
+                        />
+                      ) : (
+                        <img
+                          src={url}
+                          alt={`Media ${idx + 1}`}
+                          className="h-20 w-20 rounded-xl object-cover border border-neutral-200 dark:border-neutral-700"
+                        />
+                      )}
+                      {idx === 0 && (
+                        <span className="absolute top-1 left-1 bg-brand-600/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md">Cover</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeLocationMedia(idx)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 text-xs font-bold flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <label className="flex items-center gap-2 cursor-pointer rounded-xl border border-dashed border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 hover:border-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/20 px-3 py-2.5 transition-colors text-sm text-neutral-600 dark:text-neutral-400 w-full">
+                {locationImageUploading ? (
+                  <span className="text-brand-600 dark:text-brand-400">Uploading…</span>
+                ) : (
+                  <>📎 Add photo or video</>
+                )}
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*,video/mp4,video/quicktime,video/webm"
+                  multiple
+                  disabled={locationImageUploading}
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files || []);
+                    for (const f of files) await uploadLocationMedia(f);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
             <div className="flex gap-2">
               <button type="submit" className="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-semibold">
                 {editingLocationId ? 'Save changes' : 'Create'}
@@ -2023,36 +2441,58 @@ export default function Scheduling() {
               )}
             </div>
           </form>
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-2">
-            <div className="font-semibold mb-2">Locations</div>
-            <ul className="space-y-2 text-sm">
-              {locations.map((l) => (
-                <li key={l.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-                  <span>
-                    {l.name} ({l.code}) · {l.timezone || 'Asia/Kolkata'}
-                    {l.addressLine1 && (
-                      <span className="block text-xs text-slate-500 mt-0.5">
-                        {[l.addressLine1, l.city].filter(Boolean).join(', ')}
-                        {l.phone ? ` · ${l.phone}` : ''}
-                      </span>
-                    )}
-                    {!l.isActive && <span className="ml-2 text-xs text-amber-600">Inactive</span>}
-                  </span>
-                  <div className="flex gap-2">
+          <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+            <div className="px-4 py-3 bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700 flex items-center gap-2">
+              <span className="font-semibold text-sm text-neutral-900 dark:text-neutral-100">Locations</span>
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-bold">{locations.length}</span>
+            </div>
+            <ul className="text-sm">
+              {locations.map((l, i) => (
+                <li key={l.id} className={[
+                  'group flex flex-wrap items-center justify-between gap-3 px-4 py-3.5 border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                  i % 2 === 1 ? 'bg-neutral-50/40 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                  'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                ].join(' ')}>
+                  {(() => {
+                    const urls = Array.isArray(l.mediaUrls) ? l.mediaUrls : (l.imageUrl ? [l.imageUrl] : []);
+                    const cover = urls[0];
+                    if (!cover) return null;
+                    return isVideoUrl(cover) ? (
+                      <video src={cover} className="h-10 w-10 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700 shrink-0" muted playsInline preload="metadata" />
+                    ) : (
+                      <img src={cover} alt={l.name} className="h-10 w-10 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700 shrink-0" />
+                    );
+                  })()}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-neutral-900 dark:text-neutral-100">{l.name}</span>
+                      <span className="font-mono text-xs text-neutral-400 dark:text-neutral-500">({l.code})</span>
+                      {!l.isActive && (
+                        <span className="inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold bg-warning-50 text-warning-700 dark:bg-warning-950/40 dark:text-warning-400">Inactive</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                      🌍 {l.timezone || 'Asia/Kolkata'}
+                      {l.addressLine1 && (
+                        <span className="ml-2">{[l.addressLine1, l.city].filter(Boolean).join(', ')}{l.phone ? ` · ${l.phone}` : ''}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       type="button"
-                      className="text-xs font-semibold text-slate-600"
+                      className="px-2 py-1 rounded-lg text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
                       onClick={() => toggleLocationActive(l)}
                     >
                       {l.isActive ? 'Deactivate' : 'Activate'}
                     </button>
-                    <button type="button" className="text-xs font-semibold text-brand-600" onClick={() => startEditLocation(l)}>
+                    <button type="button" className="px-2 py-1 rounded-lg text-xs font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors" onClick={() => startEditLocation(l)}>
                       Edit
                     </button>
                   </div>
                 </li>
               ))}
-              {!locations.length && <li className="text-slate-500">No locations yet.</li>}
+              {!locations.length && <li className="px-4 py-8 text-center text-neutral-400 dark:text-neutral-500 text-sm">No locations yet.</li>}
             </ul>
           </div>
         </div>
@@ -2757,28 +3197,49 @@ function WeekScheduleGrid({ weekStart, appointments, onPrev, onNext, onToday, on
 
 function ScheduleList({ title, rows, empty, onSelect }) {
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-      <div className="px-4 py-3 font-semibold border-b border-slate-100 dark:border-slate-800">{title}</div>
-      <ul className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
-        {rows.map((a) => (
-          <li key={a.id}>
+    <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+      <div className="px-4 py-3 font-semibold text-neutral-900 dark:text-neutral-100 border-b-2 border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/60 text-sm">
+        {title}
+        <span className="ml-2 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300 text-xs font-bold">
+          {rows.length}
+        </span>
+      </div>
+      <ul className="text-sm">
+        {rows.map((a, i) => (
+          <li key={a.id} className={[
+            'border-b border-neutral-100 dark:border-neutral-800/60',
+            i % 2 === 1 ? 'bg-neutral-50/40 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+          ].join(' ')}>
             <button
               type="button"
-              className="w-full px-4 py-3 flex flex-wrap justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/40"
+              className="group w-full px-4 py-3.5 flex flex-wrap justify-between gap-2 text-left hover:bg-brand-50/40 dark:hover:bg-neutral-800/50 transition-colors"
               onClick={() => onSelect?.(a.id)}
             >
-              <div>
-                <div className="font-medium">{a.customer?.name || a.customer?.phone}</div>
-                <div className="text-xs text-slate-500">{a.service?.name} · {a.location?.name}</div>
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-bold flex items-center justify-center mt-0.5">
+                  {(a.customer?.name || a.customer?.phone || '?').charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-semibold text-neutral-900 dark:text-neutral-100 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                    {a.customer?.name || a.customer?.phone}
+                  </div>
+                  <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    {a.service?.name}{a.location?.name ? ` · ${a.location.name}` : ''}
+                  </div>
+                </div>
               </div>
-              <div className="text-right">
-                <div>{new Date(a.startAt).toLocaleString('en-IN', { hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' })}</div>
-                <StatusBadge status={a.status} />
+              <div className="text-right shrink-0">
+                <div className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                  {new Date(a.startAt).toLocaleString('en-IN', { hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' })}
+                </div>
+                <div className="mt-1"><StatusBadge status={a.status} /></div>
               </div>
             </button>
           </li>
         ))}
-        {!rows.length && <li className="px-4 py-8 text-center text-slate-500">{empty}</li>}
+        {!rows.length && (
+          <li className="px-4 py-10 text-center text-neutral-400 dark:text-neutral-500 text-sm">{empty}</li>
+        )}
       </ul>
     </div>
   );
@@ -2793,89 +3254,117 @@ function AppointmentsTable({ appointments, pagination, onPageChange, onStatus, o
     : appointments.length;
 
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-      <table className="min-w-full text-sm">
-        <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
-          <tr>
-            <th className="px-4 py-3">Ref</th>
-            <th className="px-4 py-3">Customer</th>
-            <th className="px-4 py-3">Service / Staff</th>
-            <th className="px-4 py-3">When</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Payment</th>
-            <th className="px-4 py-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-          {appointments.map((a) => (
-            <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-              <td className="px-4 py-3 font-mono text-xs">
-                <button type="button" className="text-brand-600 font-semibold hover:underline" onClick={() => onSelect?.(a.id)}>
-                  {a.appointmentNumber}
-                </button>
-              </td>
-              <td className="px-4 py-3">
-                <div>{a.customer?.name || '—'}</div>
-                <div className="text-xs text-slate-500">{a.customer?.phone}</div>
-              </td>
-              <td className="px-4 py-3">
-                <div>{a.service?.name}</div>
-                <div className="text-xs text-slate-500">{a.staff?.name} · {a.location?.name}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">{formatSourceLabel(a.source)}</div>
-              </td>
-              <td className="px-4 py-3">{new Date(a.startAt).toLocaleString('en-IN')}</td>
-              <td className="px-4 py-3"><StatusBadge status={a.status} /></td>
-              <td className="px-4 py-3 text-xs">
-                <div>{a.paymentStatus}</div>
-                {Number(a.amountDue) > 0 && (
-                  <button type="button" className="mt-1 text-brand-600 font-semibold" onClick={() => onPayment(a.id)}>
-                    Send link
-                  </button>
-                )}
-              </td>
-              <td className="px-4 py-3">
-                <select
-                  className="rounded-lg border text-xs px-2 py-1"
-                  value=""
-                  onChange={(e) => e.target.value && onStatus(a.id, e.target.value)}
-                >
-                  <option value="">Update…</option>
-                  {STATUSES.filter((s) => s !== a.status).map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </td>
+    <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700 text-left">
+            <tr>
+              {['Ref #', 'Customer', 'Service / Staff', 'When', 'Status', 'Payment', 'Actions'].map((h) => (
+                <th key={h} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{h}</th>
+              ))}
             </tr>
-          ))}
-          {!appointments.length && (
-            <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-500">No appointments yet.</td></tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {appointments.map((a, i) => (
+              <tr key={a.id} className={[
+                'group border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                i % 2 === 1 ? 'bg-neutral-50/50 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+              ].join(' ')}>
+                <td className="px-4 py-3.5 font-mono">
+                  <button
+                    type="button"
+                    className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 hover:underline"
+                    onClick={() => onSelect?.(a.id)}
+                  >
+                    #{a.appointmentNumber}
+                  </button>
+                </td>
+                <td className="px-4 py-3.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-bold flex items-center justify-center">
+                      {(a.customer?.name || a.customer?.phone || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-neutral-900 dark:text-neutral-100">{a.customer?.name || '—'}</div>
+                      <div className="text-xs font-mono text-neutral-500 dark:text-neutral-400">{a.customer?.phone}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3.5">
+                  <div className="font-medium text-neutral-800 dark:text-neutral-200">{a.service?.name}</div>
+                  <div className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    {[a.staff?.name, a.location?.name].filter(Boolean).join(' · ')}
+                  </div>
+                  <div className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">{formatSourceLabel(a.source)}</div>
+                </td>
+                <td className="px-4 py-3.5 text-xs text-neutral-600 dark:text-neutral-400 whitespace-nowrap">
+                  {new Date(a.startAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                </td>
+                <td className="px-4 py-3.5"><StatusBadge status={a.status} /></td>
+                <td className="px-4 py-3.5">
+                  <div className={[
+                    'text-xs font-semibold',
+                    a.paymentStatus === 'PAID' ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500 dark:text-neutral-400',
+                  ].join(' ')}>{a.paymentStatus}</div>
+                  {Number(a.amountDue) > 0 && (
+                    <button
+                      type="button"
+                      className="mt-1 text-xs font-bold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 hover:underline"
+                      onClick={() => onPayment(a.id)}
+                    >
+                      Send link
+                    </button>
+                  )}
+                </td>
+                <td className="px-4 py-3.5">
+                  <select
+                    className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500 transition-colors"
+                    value=""
+                    onChange={(e) => e.target.value && onStatus(a.id, e.target.value)}
+                  >
+                    <option value="">Update status…</option>
+                    {STATUSES.filter((s) => s !== a.status).map((s) => (
+                      <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, ' ')}</option>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            ))}
+            {!appointments.length && (
+              <tr>
+                <td colSpan={7} className="px-4 py-12 text-center text-neutral-400 dark:text-neutral-500 text-sm">
+                  No appointments found. Try adjusting your filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       {pagination && pagination.totalPages > 1 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <span className="text-slate-500">
-            Showing {rangeStart}–{rangeEnd} of {pagination.total}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-neutral-100 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-800/30">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">
+            Showing <span className="font-semibold text-neutral-700 dark:text-neutral-300">{rangeStart}–{rangeEnd}</span> of <span className="font-semibold text-neutral-700 dark:text-neutral-300">{pagination.total}</span>
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               disabled={pagination.page <= 1}
               onClick={() => onPageChange?.(pagination.page - 1)}
-              className="rounded-lg border px-2.5 py-1 font-semibold disabled:opacity-40"
+              className="rounded-lg border border-neutral-200 dark:border-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              Previous
+              ← Prev
             </button>
-            <span className="text-slate-600 dark:text-slate-300">
-              Page {pagination.page} of {pagination.totalPages}
+            <span className="text-xs text-neutral-500 dark:text-neutral-400 px-2">
+              Page <span className="font-semibold text-neutral-700 dark:text-neutral-300">{pagination.page}</span> of <span className="font-semibold text-neutral-700 dark:text-neutral-300">{pagination.totalPages}</span>
             </span>
             <button
               type="button"
               disabled={!pagination.hasMore}
               onClick={() => onPageChange?.(pagination.page + 1)}
-              className="rounded-lg border px-2.5 py-1 font-semibold disabled:opacity-40"
+              className="rounded-lg border border-neutral-200 dark:border-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              Next
+              Next →
             </button>
           </div>
         </div>

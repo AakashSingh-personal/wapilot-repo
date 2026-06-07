@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import { sendWhatsAppText, sendWhatsAppTemplate } from '../services/whatsapp.service.js';
+import { sendAndRecordSchedulingMessage } from '../services/outboundMessage.service.js';
 import { log } from '../utils/logger.js';
 import { sessionAllowsFreeForm } from '../utils/conversationStatus.js';
 import { getWhatsAppTemplatesForBusiness } from './schedulingSettings.service.js';
@@ -56,7 +56,7 @@ export async function findDueRebookingCustomers(businessId, { limit = 20 } = {})
   return due.slice(0, limit);
 }
 
-async function sendRebookingMessage({ business, customer, service, templates }) {
+async function sendRebookingMessage({ businessId, business, customer, service, templates }) {
   const body =
     `Hi ${customer.name || 'there'}! It's been a while since your last ${service.name} at ${business.name}.\n` +
     `We recommend booking every ${service.rebookingIntervalDays} days. Reply BOOK to schedule your next appointment.`;
@@ -64,21 +64,16 @@ async function sendRebookingMessage({ business, customer, service, templates }) 
   const useTemplate =
     templates.rebooking && !sessionAllowsFreeForm(customer.lastInboundCustomerMessageAt);
 
-  if (useTemplate) {
-    await sendWhatsAppTemplate({
-      phoneNumberId: business.phoneNumberId,
-      toPhoneE164: customer.phone,
-      templateName: templates.rebooking,
-      languageCode: templates.lang,
-      bodyParameters: [service.name, business.name],
-    });
-    return;
-  }
-
-  await sendWhatsAppText({
+  return sendAndRecordSchedulingMessage({
+    businessId,
+    customerId: customer.id,
     phoneNumberId: business.phoneNumberId,
     toPhoneE164: customer.phone,
     body,
+    templateName: templates.rebooking,
+    bodyParameters: [service.name, business.name],
+    languageCode: templates.lang,
+    useTemplate,
   });
 }
 
@@ -97,6 +92,7 @@ export async function sendRebookingCampaign(businessId, { limit = 10 } = {}) {
     if (!row.customer?.phone) continue;
     try {
       await sendRebookingMessage({
+        businessId,
         business,
         customer: row.customer,
         service: row.service,

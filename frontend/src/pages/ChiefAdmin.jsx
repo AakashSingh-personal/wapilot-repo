@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2, LogIn, RefreshCw, UserPlus, ShieldCheck,
@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { Card } from '../components/ui/Card.jsx';
 import { PageHeader } from '../components/ui/PageHeader.jsx';
 import { Tabs } from '../components/ui/Tabs.jsx';
-import { Table } from '../components/ui/Table.jsx';
+import { DataTable } from '../components/ui/DataTable.jsx';
 import { Button } from '../components/ui/Button.jsx';
 import { Input } from '../components/ui/Input.jsx';
 import { Avatar } from '../components/ui/Avatar.jsx';
@@ -79,6 +79,7 @@ export default function ChiefAdmin() {
   // Clients
   const [clients, setClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
 
   // Onboard
   const [businessName, setBusinessName] = useState('');
@@ -170,6 +171,16 @@ export default function ChiefAdmin() {
     { value: 'admins',   label: 'Admins' },
   ];
 
+  const filteredClients = useMemo(() => {
+    if (!clientSearch) return clients;
+    const q = clientSearch.toLowerCase();
+    return clients.filter(c =>
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.ownerEmail || '').toLowerCase().includes(q) ||
+      (c.id || '').toLowerCase().includes(q)
+    );
+  }, [clients, clientSearch]);
+
   const clientColumns = [
     {
       key: 'name',
@@ -210,13 +221,15 @@ export default function ChiefAdmin() {
       label: '',
       width: 100,
       render: (c) => (
-        <Button
-          variant="ghost" size="sm"
-          iconLeft={<LogIn className="w-3.5 h-3.5" />}
-          onClick={() => accessClient(c.id)}
-        >
-          Access
-        </Button>
+        <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button
+            variant="ghost" size="sm"
+            iconLeft={<LogIn className="w-3.5 h-3.5" />}
+            onClick={() => accessClient(c.id)}
+          >
+            Access
+          </Button>
+        </div>
       ),
     },
   ];
@@ -241,23 +254,20 @@ export default function ChiefAdmin() {
       {tab === 'clients' && (
         <Card>
           <Card.Header
-            title={`${clients.length} client${clients.length !== 1 ? 's' : ''}`}
-            action={
-              <Button
-                variant="secondary" size="sm"
-                iconLeft={<RefreshCw className={`w-3.5 h-3.5 ${loadingClients ? 'animate-spin' : ''}`} />}
-                onClick={loadClients}
-                disabled={loadingClients}
-              >
-                Refresh
-              </Button>
-            }
+            title="All clients"
+            subtitle={loadingClients ? undefined : `${clients.length} business${clients.length !== 1 ? 'es' : ''}`}
           />
-          <Table
+          <DataTable
             columns={clientColumns}
-            rows={clients}
+            rows={filteredClients}
             loading={loadingClients}
             skeletonRows={4}
+            totalRows={filteredClients.length}
+            searchValue={clientSearch}
+            onSearchChange={setClientSearch}
+            searchPlaceholder="Search by name, email, ID…"
+            onRefresh={loadClients}
+            striped
           />
         </Card>
       )}

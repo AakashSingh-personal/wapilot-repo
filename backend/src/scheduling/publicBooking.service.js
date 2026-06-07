@@ -53,7 +53,7 @@ export async function getPublicBookingCatalog(businessId) {
   await assertPublicBookingEnabled(businessId);
   await ensureSchedulingDefaults(businessId);
 
-  const [business, services, locations, categories, staffMembers] = await Promise.all([
+  const [business, services, locations, categories, staffMembers, settings] = await Promise.all([
     prisma.business.findUnique({ where: { id: businessId }, select: { id: true, name: true } }),
     prisma.scheduledService.findMany({
       where: { businessId, deletedAt: null, isActive: true },
@@ -70,19 +70,112 @@ export async function getPublicBookingCatalog(businessId) {
     }),
     prisma.staffMember.findMany({
       where: { businessId, deletedAt: null, activeStatus: 'ACTIVE' },
-      select: { id: true, name: true, designation: true },
+      select: { id: true, name: true, designation: true, profilePicture: true },
       orderBy: { name: 'asc' },
     }),
+    getSchedulingSettings(businessId),
   ]);
 
-  const settings = await getSchedulingSettings(businessId);
+  // Fetch recent ratings per staff (up to 5 most recent, with customer name + feedback)
+  const staffIds = staffMembers.map((s) => s.id);
+  const locationIds = locations.map((l) => l.id);
+
+  const [staffRatings, locationRatings] = await Promise.all([
+    staffIds.length
+      ? prisma.appointmentRating.findMany({
+          where: { businessId, staffId: { in: staffIds } },
+          select: {
+            staffId: true,
+            rating: true,
+            feedback: true,
+            createdAt: true,
+            customer: { select: { name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: staffIds.length * 10,
+        })
+      : [],
+    locationIds.length
+      ? prisma.appointmentRating.findMany({
+          where: {
+            businessId,
+            appointment: { locationId: { in: locationIds } },
+          },
+          select: {
+            rating: true,
+            feedback: true,
+            createdAt: true,
+            customer: { select: { name: true } },
+            appointment: { select: { locationId: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: locationIds.length * 10,
+        })
+      : [],
+  ]);
+
+  // Group ratings by staffId
+  const ratingsByStaff = {};
+  for (const r of staffRatings) {
+    if (!ratingsByStaff[r.staffId]) ratingsByStaff[r.staffId] = [];
+    if (ratingsByStaff[r.staffId].length < 5) {
+      ratingsByStaff[r.staffId].push({
+        rating: r.rating,
+        feedback: r.feedback || null,
+        customerName: r.customer?.name || null,
+        createdAt: r.createdAt,
+      });
+    }
+  }
+
+  // Group ratings by locationId
+  const ratingsByLocation = {};
+  for (const r of locationRatings) {
+    const locId = r.appointment?.locationId;
+    if (!locId) continue;
+    if (!ratingsByLocation[locId]) ratingsByLocation[locId] = [];
+    if (ratingsByLocation[locId].length < 5) {
+      ratingsByLocation[locId].push({
+        rating: r.rating,
+        feedback: r.feedback || null,
+        customerName: r.customer?.name || null,
+        createdAt: r.createdAt,
+      });
+    }
+  }
+
+  // Compute average rating per staff
+  const avgByStaff = {};
+  for (const [staffId, reviews] of Object.entries(ratingsByStaff)) {
+    const sum = reviews.reduce((a, r) => a + r.rating, 0);
+    avgByStaff[staffId] = reviews.length ? +(sum / reviews.length).toFixed(1) : null;
+  }
+
+  // Compute average rating per location
+  const avgByLocation = {};
+  for (const [locId, reviews] of Object.entries(ratingsByLocation)) {
+    const sum = reviews.reduce((a, r) => a + r.rating, 0);
+    avgByLocation[locId] = reviews.length ? +(sum / reviews.length).toFixed(1) : null;
+  }
+
+  const staffWithRatings = staffMembers.map((s) => ({
+    ...s,
+    reviews: ratingsByStaff[s.id] || [],
+    avgRating: avgByStaff[s.id] || null,
+  }));
+
+  const locationsWithRatings = locations.map((l) => ({
+    ...l,
+    reviews: ratingsByLocation[l.id] || [],
+    avgRating: avgByLocation[l.id] || null,
+  }));
 
   return {
     business,
     services,
-    locations,
+    locations: locationsWithRatings,
     categories,
-    staff: staffMembers,
+    staff: staffWithRatings,
     collectAdvance: settings.publicBookingCollectAdvance,
   };
 }

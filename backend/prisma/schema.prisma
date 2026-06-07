@@ -288,6 +288,8 @@ model Location {
   timezone     String    @default("Asia/Kolkata")
   phone        String?
   email        String?
+  imageUrl     String?
+  mediaUrls    Json      @default("[]")
   isActive     Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -381,6 +383,7 @@ model ScheduledService {
   bufferAfter   Int      @default(0)
   maxCapacity   Int      @default(1)
   rebookingIntervalDays Int?
+  imageUrl      String?
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

@@ -14,6 +14,7 @@ import { Button } from '../components/ui/Button.jsx';
 import { Badge } from '../components/ui/Badge.jsx';
 import { Modal } from '../components/ui/Modal.jsx';
 import { Checkbox } from '../components/ui/Checkbox.jsx';
+import { Avatar } from '../components/ui/Avatar.jsx';
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
@@ -846,39 +847,47 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
-                    <thead className="bg-neutral-50 dark:bg-neutral-800/60">
+                    <thead className="bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700">
                       <tr>
                         {['Type', 'Amount', 'Description', 'When'].map((h) => (
-                          <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                          <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                      {walletTxns.map((t) => (
-                        <tr key={t.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
-                          <td className="px-4 py-3">
+                    <tbody>
+                      {walletTxns.map((t, i) => (
+                        <tr key={t.id} className={[
+                          'group border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                          i % 2 === 1 ? 'bg-neutral-50/50 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                          'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                        ].join(' ')}>
+                          <td className="px-4 py-3.5">
                             <span className={[
-                              'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold',
+                              'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold',
                               t.type === 'CREDIT'
                                 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
                                 : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
                             ].join(' ')}>
+                              <span className={[
+                                'w-1.5 h-1.5 rounded-full',
+                                t.type === 'CREDIT' ? 'bg-emerald-500' : 'bg-rose-500',
+                              ].join(' ')} />
                               {t.type}
                             </span>
                           </td>
                           <td className={[
-                            'px-4 py-3 font-semibold',
+                            'px-4 py-3.5 font-bold tabular-nums',
                             t.type === 'CREDIT' ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300',
                           ].join(' ')}>
                             {t.type === 'CREDIT' ? '+' : '-'}₹{Number(t.amount).toLocaleString('en-IN')}
                           </td>
-                          <td className="px-4 py-3 text-neutral-600 dark:text-neutral-300">{t.description || '—'}</td>
-                          <td className="px-4 py-3 text-neutral-500 text-xs">{new Date(t.createdAt).toLocaleString()}</td>
+                          <td className="px-4 py-3.5 text-neutral-600 dark:text-neutral-300 max-w-xs truncate">{t.description || <span className="text-neutral-300 dark:text-neutral-600">—</span>}</td>
+                          <td className="px-4 py-3.5 text-neutral-500 dark:text-neutral-400 text-xs whitespace-nowrap">{new Date(t.createdAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
                         </tr>
                       ))}
                       {!walletTxns.length && (
                         <tr>
-                          <td colSpan={4} className="px-4 py-10 text-center text-sm text-neutral-500">
+                          <td colSpan={4} className="px-4 py-12 text-center text-sm text-neutral-400 dark:text-neutral-500">
                             No wallet transactions yet.
                           </td>
                         </tr>
@@ -1051,31 +1060,48 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                 <Button variant="primary" size="sm" loading={fieldsSaving} onClick={createFieldDefinition} iconLeft={<Plus className="w-3.5 h-3.5" />}>
                   Create field
                 </Button>
-                <div className="overflow-x-auto rounded-xl border border-neutral-100 dark:border-neutral-800">
+                <div className="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-800">
                   <table className="min-w-full text-sm">
-                    <thead className="bg-neutral-50 dark:bg-neutral-800/60">
+                    <thead className="bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700">
                       <tr>
-                        {['Key', 'Label', 'Type', 'Default', ''].map((h) => (
-                          <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                        {['Key', 'Label', 'Type', 'Default value', ''].map((h) => (
+                          <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                      {fieldDefs.map((d) => (
-                        <tr key={d.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
-                          <td className="px-3 py-2.5 font-mono text-xs text-brand-700 dark:text-brand-300">{d.key}</td>
-                          <td className="px-3 py-2.5 text-neutral-700 dark:text-neutral-300">{d.label}</td>
-                          <td className="px-3 py-2.5 text-neutral-500">{d.type}</td>
-                          <td className="px-3 py-2.5 max-w-xs truncate text-neutral-500">{d.defaultValue}</td>
-                          <td className="px-3 py-2.5">
-                            <button type="button" className="text-xs font-semibold text-red-600 hover:text-red-700 transition-colors" onClick={() => deleteFieldDefinition(d.id)}>
+                    <tbody>
+                      {fieldDefs.map((d, i) => (
+                        <tr key={d.id} className={[
+                          'group border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                          i % 2 === 1 ? 'bg-neutral-50/50 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                          'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                        ].join(' ')}>
+                          <td className="px-4 py-3">
+                            <code className="font-mono text-xs bg-brand-50 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded border border-brand-100 dark:border-brand-900">{d.key}</code>
+                          </td>
+                          <td className="px-4 py-3 font-medium text-neutral-800 dark:text-neutral-200">{d.label}</td>
+                          <td className="px-4 py-3">
+                            <span className={[
+                              'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold',
+                              d.type === 'BUSINESS'
+                                ? 'bg-info-50 text-info-700 dark:bg-info-950/40 dark:text-info-300'
+                                : 'bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300',
+                            ].join(' ')}>{d.type}</span>
+                          </td>
+                          <td className="px-4 py-3 max-w-xs truncate text-neutral-500 dark:text-neutral-400 text-xs">{d.defaultValue || <span className="text-neutral-300 dark:text-neutral-600">—</span>}</td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-xs font-semibold text-error-600 dark:text-error-400 hover:text-error-700 dark:hover:text-error-300 px-2 py-1 rounded-lg hover:bg-error-50 dark:hover:bg-error-950/30"
+                              onClick={() => deleteFieldDefinition(d.id)}
+                            >
                               Delete
                             </button>
                           </td>
                         </tr>
                       ))}
                       {!fieldDefs.length && (
-                        <tr><td colSpan={5} className="px-3 py-8 text-center text-sm text-neutral-500">No custom fields yet.</td></tr>
+                        <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-neutral-400 dark:text-neutral-500">No custom fields yet. Create one above.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1149,51 +1175,70 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-neutral-50 dark:bg-neutral-800/60">
+                  <thead className="bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700">
                     <tr>
-                      {['Name', 'Phone', 'Paid', 'Bookings', 'Products', ''].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                      {['Contact', 'Phone', 'Amount paid', 'Bookings', 'Products', ''].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                    {contactBookRows.map((r) => (
-                      <tr key={r.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
-                        <td className="px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">{r.name || '—'}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-neutral-500">{r.phone}</td>
-                        <td className="px-4 py-3 text-neutral-700 dark:text-neutral-300">₹{Number(r.amountPaid || 0).toFixed(2)}</td>
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-neutral-900 dark:text-neutral-100">{r.bookingCount || 0}</div>
-                          {Array.isArray(r.bookingIds) && r.bookingIds.length ? (
-                            <div className="text-[11px] text-neutral-400 truncate max-w-[200px]">
-                              {r.bookingIds.slice(0, 5).join(', ')}{r.bookingIds.length > 5 ? ` +${r.bookingIds.length - 5} more` : ''}
-                            </div>
-                          ) : null}
+                  <tbody>
+                    {contactBookRows.map((r, i) => (
+                      <tr key={r.id} className={[
+                        'group border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                        i % 2 === 1 ? 'bg-neutral-50/50 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                        'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                      ].join(' ')}>
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <Avatar name={r.name || r.phone} size="sm" />
+                            <span className="font-semibold text-neutral-900 dark:text-neutral-100">{r.name || <span className="text-neutral-400 italic font-normal">No name</span>}</span>
+                          </div>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3.5 font-mono text-xs text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{r.phone}</td>
+                        <td className="px-4 py-3.5 font-bold tabular-nums text-neutral-900 dark:text-neutral-100">
+                          {Number(r.amountPaid || 0) > 0
+                            ? <span className="text-emerald-700 dark:text-emerald-300">₹{Number(r.amountPaid).toLocaleString('en-IN')}</span>
+                            : <span className="text-neutral-300 dark:text-neutral-600">—</span>
+                          }
+                        </td>
+                        <td className="px-4 py-3.5">
+                          {r.bookingCount > 0 ? (
+                            <div>
+                              <span className="inline-flex items-center justify-center min-w-[22px] h-[22px] rounded-full bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 text-xs font-bold">{r.bookingCount}</span>
+                            </div>
+                          ) : (
+                            <span className="text-neutral-300 dark:text-neutral-600">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5">
                           {Array.isArray(r.productsBought) && r.productsBought.length ? (
                             <div>
-                              <div className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">{r.productsBought.length} item(s)</div>
-                              <div className="text-[11px] text-neutral-400 truncate max-w-[200px]">
-                                {r.productsBought.slice(0, 4).map((p) => `${p.name}${p.count > 1 ? ` (${p.count})` : ''}`).join(', ')}
-                                {r.productsBought.length > 4 ? ` +${r.productsBought.length - 4} more` : ''}
+                              <div className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">{r.productsBought.length} item{r.productsBought.length !== 1 ? 's' : ''}</div>
+                              <div className="text-[11px] text-neutral-400 dark:text-neutral-500 truncate max-w-[180px] mt-0.5">
+                                {r.productsBought.slice(0, 3).map((p) => `${p.name}${p.count > 1 ? ` ×${p.count}` : ''}`).join(', ')}
+                                {r.productsBought.length > 3 ? ` +${r.productsBought.length - 3} more` : ''}
                               </div>
                             </div>
-                          ) : <span className="text-xs text-neutral-400">—</span>}
+                          ) : <span className="text-neutral-300 dark:text-neutral-600 text-xs">—</span>}
                         </td>
-                        <td className="px-4 py-3">
-                          <button type="button" onClick={() => deleteContact(r.id)} className="text-xs font-semibold text-red-600 hover:text-red-700 transition-colors">
+                        <td className="px-4 py-3.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => deleteContact(r.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-xs font-semibold text-error-600 dark:text-error-400 hover:text-error-700 dark:hover:text-error-300 px-2 py-1 rounded-lg hover:bg-error-50 dark:hover:bg-error-950/30"
+                          >
                             Delete
                           </button>
                         </td>
                       </tr>
                     ))}
                     {!contactBookRows.length && !contactBookLoading && (
-                      <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-neutral-500">No contacts found.</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-neutral-400 dark:text-neutral-500">No contacts found.</td></tr>
                     )}
                     {contactBookLoading && !contactBookRows.length && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-10 text-center">
+                        <td colSpan={6} className="px-4 py-12 text-center">
                           <Loader2 className="w-5 h-5 text-neutral-400 animate-spin mx-auto" />
                         </td>
                       </tr>
@@ -1450,37 +1495,58 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                   </div>
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-sm">
-                      <thead className="bg-neutral-50 dark:bg-neutral-800/60">
+                      <thead className="bg-neutral-50 dark:bg-neutral-800/60 border-b-2 border-neutral-200 dark:border-neutral-700">
                         <tr>
-                          {['Name', 'Content', 'Meta status', 'Local status', 'Actions'].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                          {['Name', 'Preview', 'Meta status', 'Status', 'Actions'].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-                        {templates.map((t) => (
-                          <tr key={t.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
-                            <td className="px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">{t.name}</td>
-                            <td className="px-4 py-3 text-neutral-500 max-w-xs truncate text-xs">{t.content}</td>
-                            <td className="px-4 py-3">
-                              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${metaStatusBadgeClass(t.metaStatus || 'NOT_FOUND')}`}>
+                      <tbody>
+                        {templates.map((t, i) => (
+                          <tr key={t.id} className={[
+                            'group border-b border-neutral-100 dark:border-neutral-800/60 transition-colors',
+                            i % 2 === 1 ? 'bg-neutral-50/50 dark:bg-neutral-800/20' : 'bg-white dark:bg-neutral-900',
+                            'hover:bg-brand-50/30 dark:hover:bg-neutral-800/50',
+                          ].join(' ')}>
+                            <td className="px-4 py-3.5 font-semibold text-neutral-900 dark:text-neutral-100 whitespace-nowrap">
+                              {t.name}
+                            </td>
+                            <td className="px-4 py-3.5 text-neutral-500 dark:text-neutral-400 max-w-xs truncate text-xs italic">
+                              {t.content || <span className="text-neutral-300 dark:text-neutral-600 not-italic">—</span>}
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${metaStatusBadgeClass(t.metaStatus || 'NOT_FOUND')}`}>
+                                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
                                 {displayMetaStatus(t.metaStatus)}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-xs text-neutral-500">{t.status}</td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                                <button type="button" className="text-xs font-semibold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1 transition-colors" onClick={() => navigate(`/communications/templates/${t.id}/edit`)}>
+                            <td className="px-4 py-3.5">
+                              <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300">
+                                {t.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button type="button"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 transition-colors"
+                                  onClick={() => navigate(`/communications/templates/${t.id}/edit`)}>
                                   <Edit3 className="w-3 h-3" /> Edit
                                 </button>
-                                <button type="button" className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 inline-flex items-center gap-1 transition-colors" onClick={() => { setCloneSource({ id: t.id, name: t.name }); setCloneNewName(`Copy of ${t.name}`); setCloneOnMeta(false); }}>
+                                <button type="button"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                                  onClick={() => { setCloneSource({ id: t.id, name: t.name }); setCloneNewName(`Copy of ${t.name}`); setCloneOnMeta(false); }}>
                                   <Copy className="w-3 h-3" /> Clone
                                 </button>
-                                <button type="button" disabled={syncingTemplateId === t.id} className="text-xs font-semibold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1 disabled:opacity-50 transition-colors" onClick={() => updateTemplateStatus(t.id)}>
+                                <button type="button" disabled={syncingTemplateId === t.id}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/30 disabled:opacity-40 transition-colors"
+                                  onClick={() => updateTemplateStatus(t.id)}>
                                   <RefreshCw className={`w-3 h-3 ${syncingTemplateId === t.id ? 'animate-spin' : ''}`} />
                                   Sync
                                 </button>
-                                <button type="button" className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 inline-flex items-center gap-1 transition-colors" onClick={() => openMappingModal(t.id)}>
+                                <button type="button"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                                  onClick={() => openMappingModal(t.id)}>
                                   Map {`{{n}}`}
                                 </button>
                               </div>
@@ -1488,7 +1554,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                           </tr>
                         ))}
                         {!templates.length && (
-                          <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-neutral-500">No templates yet.</td></tr>
+                          <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-neutral-400 dark:text-neutral-500">No templates yet. Create your first one above.</td></tr>
                         )}
                       </tbody>
                     </table>

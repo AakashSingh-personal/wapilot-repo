@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import { createRazorpayPaymentLink } from '../services/razorpay.service.js';
-import { sendWhatsAppText } from '../services/whatsapp.service.js';
+import { buildUpiLink } from '../utils/upi.js';
+import { sendAndRecordWhatsAppText } from '../services/outboundMessage.service.js';
 import { publish } from '../realtime/publisher.js';
 import { EventType } from '../realtime/events.js';
 import { log } from '../utils/logger.js';
@@ -50,6 +51,49 @@ export async function createAppointmentPaymentIntent({
     chargeAmount = Math.min(chargeAmount, amountDue);
   }
 
+  const razorpayAvailable =
+    Boolean(process.env.RAZORPAY_KEY_ID) && Boolean(process.env.RAZORPAY_KEY_SECRET);
+
+  if (razorpayAvailable) {
+    try {
+      return await createRazorpayAppointmentPayment({
+        businessId,
+        appt,
+        chargeAmount,
+        mode,
+        advancePercent,
+      });
+    } catch (e) {
+      // Bad credentials or payment-links disabled — fall back to UPI when configured.
+      if (e.statusCode === 401 || e.statusCode === 403) {
+        log('warn', 'razorpay_payment_link_auth_failed', { message: e.message });
+        const upiResult = await tryUpiAppointmentPayment({ businessId, appt, chargeAmount, mode });
+        if (upiResult) return upiResult;
+        const err = new Error('Payment gateway unavailable — please contact support');
+        err.statusCode = 503;
+        throw err;
+      }
+      throw e;
+    }
+  }
+
+  const upiResult = await tryUpiAppointmentPayment({ businessId, appt, chargeAmount, mode });
+  if (upiResult) return upiResult;
+
+  const err = new Error(
+    'Payment gateway is not configured. Please contact the business to arrange payment.',
+  );
+  err.statusCode = 503;
+  throw err;
+}
+
+async function createRazorpayAppointmentPayment({
+  businessId,
+  appt,
+  chargeAmount,
+  mode,
+  advancePercent,
+}) {
   const pending = await prisma.appointmentPayment.create({
     data: {
       businessId,
@@ -79,6 +123,11 @@ export async function createAppointmentPaymentIntent({
     });
   } catch (e) {
     await prisma.appointmentPayment.delete({ where: { id: pending.id } });
+    if (e.statusCode === 401 || e.statusCode === 403) {
+      const err = new Error(e.error?.description || e.message || 'Razorpay authentication failed');
+      err.statusCode = e.statusCode;
+      throw err;
+    }
     throw e;
   }
 
@@ -99,7 +148,9 @@ export async function createAppointmentPaymentIntent({
   if (business?.phoneNumberId && appt.customer?.phone) {
     const when = new Date(appt.startAt).toLocaleString('en-IN');
     try {
-      await sendWhatsAppText({
+      await sendAndRecordWhatsAppText({
+        businessId,
+        customerId: appt.customer.id,
         phoneNumberId: business.phoneNumberId,
         toPhoneE164: appt.customer.phone,
         body:
@@ -119,6 +170,57 @@ export async function createAppointmentPaymentIntent({
     paymentLinkUrl: paymentLink.short_url,
     providerLinkId: paymentLink.id,
     mode,
+    method: 'razorpay',
+  };
+}
+
+async function tryUpiAppointmentPayment({ businessId, appt, chargeAmount, mode }) {
+  const bizConfig = await prisma.businessConfig.findUnique({
+    where: { businessId },
+    select: { upiId: true },
+  });
+  const upiId = bizConfig?.upiId || null;
+  if (!upiId) return null;
+
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { name: true, phoneNumberId: true },
+  });
+
+  const upiLink = buildUpiLink({
+    pa: upiId,
+    pn: business?.name || 'Business',
+    am: String(chargeAmount),
+  });
+
+  if (business?.phoneNumberId && appt.customer?.phone) {
+    const when = new Date(appt.startAt).toLocaleString('en-IN');
+    try {
+      await sendAndRecordWhatsAppText({
+        businessId,
+        customerId: appt.customer.id,
+        phoneNumberId: business.phoneNumberId,
+        toPhoneE164: appt.customer.phone,
+        body:
+          `Payment for your appointment (${appt.appointmentNumber}):\n` +
+          `${appt.service?.name} on ${when}\n` +
+          `Amount: ₹${chargeAmount.toLocaleString('en-IN')}\n` +
+          `UPI: ${upiId}\n` +
+          `Pay via app: ${upiLink}`,
+      });
+    } catch (e) {
+      log('warn', 'appointment_payment_whatsapp_failed', { message: e.message });
+    }
+  }
+
+  return {
+    appointmentPaymentId: null,
+    amount: chargeAmount,
+    paymentLinkUrl: upiLink,
+    providerLinkId: null,
+    mode,
+    method: 'upi',
+    upiId,
   };
 }
 

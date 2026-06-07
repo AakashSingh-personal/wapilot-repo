@@ -41,9 +41,23 @@ async function findBusinessByPhoneNumberId(phoneNumberId) {
   });
 }
 
+function phoneVariants(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  let base = digits;
+  if (digits.length === 12 && digits.startsWith('91')) base = digits.slice(2);
+  else if (digits.length === 13 && digits.startsWith('091')) base = digits.slice(3);
+  const set = new Set([base, `91${base}`, `+91${base}`, `+${digits}`, digits]);
+  return [...set].filter(Boolean);
+}
+
 async function findOrCreateCustomer({ businessId, phone, name }) {
-  const existing = await prisma.customer.findUnique({
-    where: { businessId_phone: { businessId, phone } },
+  // Search all format variants to avoid creating duplicates when the same
+  // customer exists under a different phone format (e.g. "+919..." vs "9...").
+  const existing = await prisma.customer.findFirst({
+    where: {
+      businessId,
+      phone: { in: phoneVariants(phone) },
+    },
   });
   if (existing) {
     if (name && !existing.name) {
@@ -297,7 +311,29 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
     return { ok: true, skipped: true, reason: 'session_expired' };
   }
 
-  const knowledge = aiKnowledgeFromConfig(cfg.services);
+  // Build AI knowledge:
+  //   services → from DB ScheduledService records (includes imageUrl)
+  //   products → from BusinessConfig.services JSON (managed from Scheduling > Products tab)
+  //   clientDetails → from BusinessConfig.services JSON
+  const configKnowledge = aiKnowledgeFromConfig(cfg.services);
+  const dbServices = await prisma.scheduledService.findMany({
+    where: { businessId: business.id, isActive: true, deletedAt: null },
+    select: { name: true, price: true, description: true, imageUrl: true, durationMin: true },
+    orderBy: { name: 'asc' },
+  });
+  const knowledge = {
+    services: dbServices.length > 0
+      ? dbServices.map((s) => ({
+          name: s.name,
+          price: `₹${Number(s.price)}`,
+          description: s.description || '',
+          imageUrl: s.imageUrl || '',
+          durationMin: s.durationMin,
+        }))
+      : configKnowledge.services,
+    products: configKnowledge.products,
+    clientDetails: configKnowledge.clientDetails,
+  };
 
   const intent = detectIntent(textBody);
   const history = await recentConversation(customer.id, business.id, 12);

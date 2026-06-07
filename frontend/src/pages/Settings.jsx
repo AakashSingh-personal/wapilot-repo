@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  Building2, Phone, User, HeadphonesIcon, Sparkles, Package,
-  Wrench, Clock, Bell, CreditCard, Plus, Trash2, ArrowUp, ArrowDown, Copy,
-  Save, CheckCircle2, AlertCircle, Upload,
+  Building2, Phone, User, HeadphonesIcon, Sparkles,
+  Wrench, Clock, Bell, CreditCard, Save, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { api } from '../services/api.js';
 import UserManagement from './UserManagement.jsx';
@@ -13,179 +12,12 @@ import { Input } from '../components/ui/Input.jsx';
 import { Textarea } from '../components/ui/Textarea.jsx';
 import { Toggle } from '../components/ui/Toggle.jsx';
 import { Button } from '../components/ui/Button.jsx';
-import { Spinner } from '../components/ui/Spinner.jsx';
-
-/* ─── Catalog helpers (same logic, new UI) ────────────────────────────────── */
-function normalizeItems(input) {
-  if (!Array.isArray(input)) return [];
-  return input.map((item) => {
-    if (item && typeof item === 'object') {
-      return {
-        name: item.name || item.title || '',
-        price: item.price || '',
-        description: item.description || item.details || '',
-        imageUrl: item.imageUrl || item.image || '',
-      };
-    }
-    return { name: String(item || ''), price: '', description: '', imageUrl: '' };
-  });
-}
-
-function emptyItem() {
-  return { name: '', price: '', description: '', imageUrl: '' };
-}
-
-function CatalogEditor({ title, items, onChange, addLabel }) {
-  const [uploadingIndex, setUploadingIndex] = useState(-1);
-
-  function updateAt(index, key, value) {
-    onChange(items.map((it, i) => (i === index ? { ...it, [key]: value } : it)));
-  }
-  function removeAt(index) { onChange(items.filter((_, i) => i !== index)); }
-  function addOne() { onChange([...items, emptyItem()]); }
-  function moveItem(index, dir) {
-    const next = index + dir;
-    if (next < 0 || next >= items.length) return;
-    const arr = [...items];
-    [arr[index], arr[next]] = [arr[next], arr[index]];
-    onChange(arr);
-  }
-  function duplicateAt(index) {
-    onChange([...items.slice(0, index + 1), { ...items[index] }, ...items.slice(index + 1)]);
-  }
-
-  async function uploadItemImage(index, file) {
-    if (!file) return;
-    setUploadingIndex(index);
-    try {
-      const base64Data = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(new Error('File read failed'));
-        reader.readAsDataURL(file);
-      });
-      const { data } = await api.post('/media/upload', {
-        base64Data,
-        mimeType: file.type || 'application/octet-stream',
-        fileName: file.name,
-      });
-      updateAt(index, 'imageUrl', data.publicUrl || '');
-    } catch {
-      // Leave field unchanged on upload failure
-    } finally {
-      setUploadingIndex(-1);
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">{title}</p>
-        <Button variant="secondary" size="sm" iconLeft={<Plus className="w-3.5 h-3.5" />} onClick={addOne}>
-          {addLabel}
-        </Button>
-      </div>
-
-      {items.length === 0 && (
-        <p className="text-xs text-neutral-400 italic py-2">
-          No {title.toLowerCase()} yet — click "{addLabel}" to add one.
-        </p>
-      )}
-
-      <div className="space-y-3">
-        {items.map((item, index) => (
-          <div
-            key={`${title}-${index}`}
-            className="rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/40 p-4 space-y-3"
-          >
-            <div className="grid sm:grid-cols-2 gap-3">
-              <Input
-                placeholder="Name"
-                value={item.name}
-                onChange={(e) => updateAt(index, 'name', e.target.value)}
-              />
-              <Input
-                placeholder="Price (e.g. ₹499)"
-                value={item.price}
-                onChange={(e) => updateAt(index, 'price', e.target.value)}
-              />
-            </div>
-            <Textarea
-              rows={2}
-              placeholder="Short description"
-              value={item.description}
-              onChange={(e) => updateAt(index, 'description', e.target.value)}
-            />
-            <div className="space-y-2">
-              <Input
-                placeholder="Image URL (optional)"
-                value={item.imageUrl || ''}
-                onChange={(e) => updateAt(index, 'imageUrl', e.target.value)}
-              />
-              <div className="flex items-center gap-3">
-                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-600 dark:text-neutral-400 cursor-pointer hover:text-brand-600 transition-colors">
-                  <Upload className="w-3.5 h-3.5" />
-                  Upload image
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => uploadItemImage(index, e.target.files?.[0])}
-                  />
-                </label>
-                {uploadingIndex === index && <Spinner size="xs" />}
-              </div>
-              {item.imageUrl && (
-                <img
-                  src={item.imageUrl}
-                  alt={item.name}
-                  className="h-16 w-16 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700"
-                />
-              )}
-            </div>
-            <div className="flex items-center gap-2 pt-1">
-              <Button
-                variant="ghost" size="xs"
-                icon={<ArrowUp className="w-3.5 h-3.5" />}
-                disabled={index === 0}
-                onClick={() => moveItem(index, -1)}
-                title="Move up"
-              />
-              <Button
-                variant="ghost" size="xs"
-                icon={<ArrowDown className="w-3.5 h-3.5" />}
-                disabled={index === items.length - 1}
-                onClick={() => moveItem(index, 1)}
-                title="Move down"
-              />
-              <Button
-                variant="ghost" size="xs"
-                icon={<Copy className="w-3.5 h-3.5" />}
-                onClick={() => duplicateAt(index)}
-                title="Duplicate"
-              />
-              <div className="flex-1" />
-              <Button
-                variant="ghost" size="xs"
-                icon={<Trash2 className="w-3.5 h-3.5 text-error-500" />}
-                onClick={() => removeAt(index)}
-                title="Remove"
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /* ─── Settings page ──────────────────────────────────────────────────────── */
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('general');
   const [businessName, setBusinessName] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
-  const [services, setServices] = useState([]);
-  const [products, setProducts] = useState([]);
   const [clientDetails, setClientDetails] = useState('');
   const [clientProfile, setClientProfile] = useState({
     business_name: '',
@@ -208,8 +40,6 @@ export default function Settings() {
         if (cancelled) return;
         setBusinessName(data.business?.name || '');
         setPhoneNumberId(data.business?.phoneNumberId || '');
-        setServices(normalizeItems(data.config?.services ?? []));
-        setProducts(normalizeItems(data.config?.products ?? []));
         setClientDetails(data.config?.clientDetails || '');
         setClientProfile({
           business_name: data.config?.clientProfile?.business_name || '',
@@ -242,22 +72,11 @@ export default function Settings() {
       return;
     }
 
-    const clean = (arr) => arr
-      .map(item => ({
-        name: item.name?.trim() || '',
-        price: item.price?.trim() || '',
-        description: item.description?.trim() || '',
-        imageUrl: item.imageUrl?.trim() || '',
-      }))
-      .filter(item => item.name || item.price || item.description || item.imageUrl);
-
     setSaving(true);
     try {
       await api.put('/config', {
         businessName,
         phoneNumberId: phoneNumberId || null,
-        services: clean(services),
-        products: clean(products),
         clientDetails: clientDetails || '',
         clientProfile: {
           business_name: clientProfile.business_name?.trim() || '',
@@ -385,22 +204,6 @@ export default function Settings() {
                 onChange={(e) => setClientDetails(e.target.value)}
                 placeholder="Example: We are Glow Clinic in Jaipur. Friendly tone. 10am-8pm Mon–Sat. No refunds after 24 hours."
               />
-            </Card.Body>
-          </Card>
-
-          {/* Services catalog */}
-          <Card>
-            <Card.Header title="Services" subtitle="AI uses these for booking and queries" />
-            <Card.Body>
-              <CatalogEditor title="Services" items={services} onChange={setServices} addLabel="Add Service" />
-            </Card.Body>
-          </Card>
-
-          {/* Products catalog */}
-          <Card>
-            <Card.Header title="Products" subtitle="Products available at your business" />
-            <Card.Body>
-              <CatalogEditor title="Products" items={products} onChange={setProducts} addLabel="Add Product" />
             </Card.Body>
           </Card>
 

@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import { sendWhatsAppText } from '../services/whatsapp.service.js';
+import { sendAndRecordWhatsAppText } from '../services/outboundMessage.service.js';
 import { createAppointment } from './appointment.service.js';
 import { formatAppointmentWhen } from './appointmentLinks.service.js';
 
@@ -107,7 +107,9 @@ export async function processWaitlistForSlot({
     `Reply YES within ${OFFER_TTL_MIN} minutes to book, or NO to skip.`;
 
   if (business?.phoneNumberId && entry.customer?.phone) {
-    await sendWhatsAppText({
+    await sendAndRecordWhatsAppText({
+      businessId,
+      customerId: entry.customer.id,
       phoneNumberId: business.phoneNumberId,
       toPhoneE164: entry.customer.phone,
       body,

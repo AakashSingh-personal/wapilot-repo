@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
-import { sendWhatsAppText, sendWhatsAppTemplate } from '../services/whatsapp.service.js';
+import { sendWhatsAppTemplate } from '../services/whatsapp.service.js';
+import { sendAndRecordSchedulingMessage, sendAndRecordWhatsAppText } from '../services/outboundMessage.service.js';
 import { log } from '../utils/logger.js';
 import { sessionAllowsFreeForm } from '../utils/conversationStatus.js';
 import {
@@ -37,6 +38,7 @@ function appointmentTemplateParams(appointment, extraLabel = '') {
 }
 
 async function sendSchedulingWhatsApp({
+  businessId,
   phoneNumberId,
   customer,
   body,
@@ -47,21 +49,16 @@ async function sendSchedulingWhatsApp({
   const useTemplate =
     templateName && !sessionAllowsFreeForm(customer?.lastInboundCustomerMessageAt);
 
-  if (useTemplate) {
-    const res = await sendWhatsAppTemplate({
-      phoneNumberId,
-      toPhoneE164: customer.phone,
-      templateName,
-      languageCode: languageCode || templateLang(),
-      bodyParameters,
-    });
-    if (!res?.skipped) return res;
-  }
-
-  return sendWhatsAppText({
+  return sendAndRecordSchedulingMessage({
+    businessId,
+    customerId: customer.id,
     phoneNumberId,
     toPhoneE164: customer.phone,
     body,
+    templateName,
+    bodyParameters,
+    languageCode: languageCode || templateLang(),
+    useTemplate,
   });
 }
 
@@ -129,7 +126,9 @@ export async function sendRatingRequestWhatsApp(appointment) {
   if (!business?.phoneNumberId) return;
 
   try {
-    await sendWhatsAppText({
+    await sendAndRecordWhatsAppText({
+      businessId: full.businessId,
+      customerId: full.customer.id,
       phoneNumberId: business.phoneNumberId,
       toPhoneE164: full.customer.phone,
       body:
@@ -164,6 +163,7 @@ export async function sendAppointmentConfirmationWhatsApp(appointment) {
   try {
     const templates = await getWhatsAppTemplatesForBusiness(full.businessId);
     await sendSchedulingWhatsApp({
+      businessId: full.businessId,
       phoneNumberId: business.phoneNumberId,
       customer: full.customer,
       body: buildConfirmationMessage(full),
@@ -274,6 +274,7 @@ async function dispatchReminderRow(row) {
       const templates = await getWhatsAppTemplatesForBusiness(row.businessId);
       const label = row.payload?.label || 'soon';
       await sendSchedulingWhatsApp({
+        businessId: row.businessId,
         phoneNumberId: business.phoneNumberId,
         customer,
         body,
@@ -334,6 +335,7 @@ export async function sendTestNotificationsForAppointment(appointmentId, busines
         if (!business?.phoneNumberId) continue;
         const templates = await getWhatsAppTemplatesForBusiness(businessId);
         await sendSchedulingWhatsApp({
+          businessId,
           phoneNumberId: business.phoneNumberId,
           customer: appointment.customer,
           body: message,

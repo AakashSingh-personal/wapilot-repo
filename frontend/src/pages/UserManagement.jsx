@@ -1,16 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { UserPlus, RefreshCw, KeyRound, Trash2, X, ChevronDown, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { api } from '../services/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Card } from '../components/ui/Card.jsx';
 import { PageHeader } from '../components/ui/PageHeader.jsx';
-import { Table } from '../components/ui/Table.jsx';
+import { DataTable } from '../components/ui/DataTable.jsx';
 import { Button } from '../components/ui/Button.jsx';
 import { Input } from '../components/ui/Input.jsx';
 import { Select } from '../components/ui/Select.jsx';
 import { Badge } from '../components/ui/Badge.jsx';
 import { Avatar } from '../components/ui/Avatar.jsx';
 import { Modal } from '../components/ui/Modal.jsx';
+import { FilterChip } from '../components/ui/FilterChip.jsx';
 
 const roleBadge = {
   OWNER:       { variant: 'brand',   label: 'Owner' },
@@ -37,6 +38,9 @@ export default function UserManagement({ embedded = false }) {
   const [password, setPassword] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  // UI filter state (no API calls changed)
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
 
   async function loadAll() {
     setLoading(true);
@@ -115,6 +119,19 @@ export default function UserManagement({ embedded = false }) {
     }
   }
 
+  const filteredUsers = useMemo(() => {
+    let list = users;
+    if (roleFilter) list = list.filter(u => u.role === roleFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(u =>
+        u.email.toLowerCase().includes(q) ||
+        (u.businessName || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [users, search, roleFilter]);
+
   const columns = [
     {
       key: 'email',
@@ -158,7 +175,7 @@ export default function UserManagement({ embedded = false }) {
       width: 160,
       render: (u) =>
         canManageTarget(u) ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <Button
               variant="ghost" size="sm"
               iconLeft={<KeyRound className="w-3.5 h-3.5" />}
@@ -273,11 +290,39 @@ export default function UserManagement({ embedded = false }) {
             </div>
           }
         />
-        <Table
+        <DataTable
           columns={columns}
-          rows={users}
+          rows={filteredUsers}
           loading={loading}
           skeletonRows={4}
+          totalRows={filteredUsers.length}
+          searchValue={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search by email…"
+          filterChips={
+            roleFilter ? (
+              <FilterChip
+                label="Role"
+                value={roleFilter}
+                onRemove={() => setRoleFilter('')}
+              />
+            ) : null
+          }
+          onClearFilters={search || roleFilter ? () => { setSearch(''); setRoleFilter(''); } : undefined}
+          toolbarActions={
+            <Select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              containerClassName="w-36"
+              className="h-8 text-xs"
+            >
+              <option value="">All roles</option>
+              <option value="OWNER">Owner</option>
+              <option value="STAFF">Staff</option>
+              <option value="CHIEF_ADMIN">Chief Admin</option>
+            </Select>
+          }
+          striped
         />
       </Card>
 
