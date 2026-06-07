@@ -25,7 +25,7 @@ export function createApp() {
         // Allow non-browser requests (curl, server-to-server) without an Origin header.
         if (!origin) return callback(null, true);
         if (isAllowedOrigin(origin)) return callback(null, true);
-        return callback(new Error(`CORS blocked for origin: ${origin}`));
+        return callback(null, false);
       },
       credentials: true,
     }),
