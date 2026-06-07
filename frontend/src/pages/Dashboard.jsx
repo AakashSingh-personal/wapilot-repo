@@ -1,27 +1,55 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  Users, MessageSquare, IndianRupee, CalendarDays,
+  ArrowRight, Bot, User, Clock,
+} from 'lucide-react';
+import {
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+} from 'recharts';
 import { api } from '../services/api.js';
 import { previewText } from '../utils/whatsappMessagePreview.js';
 import { SessionBadge, MessageBadge } from '../components/ChatStatusBadges.jsx';
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from 'recharts';
+import { StatCard } from '../components/ui/StatCard.jsx';
+import { Card } from '../components/ui/Card.jsx';
+import { Badge, AppointmentStatusBadge } from '../components/ui/Badge.jsx';
+import { Avatar } from '../components/ui/Avatar.jsx';
+import { Skeleton } from '../components/ui/Skeleton.jsx';
+import { PageHeader } from '../components/ui/PageHeader.jsx';
+import { buildChartTheme } from '../design-system/chartTheme.js';
+import { useTheme } from '../context/ThemeContext.jsx';
+
+function formatINR(n) {
+  return `₹${Number(n || 0).toLocaleString('en-IN')}`;
+}
+
+function formatRelativeTime(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 export default function Dashboard() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  const chartTheme = buildChartTheme(isDark);
+
   const [stats, setStats] = useState(null);
   const [scheduling, setScheduling] = useState(null);
   const [recentChats, setRecentChats] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         const { data } = await api.get('/dashboard/stats');
         if (!cancelled) setStats(data);
@@ -40,196 +68,276 @@ export default function Dashboard() {
       } catch {
         if (!cancelled) setRecentChats([]);
       }
+      if (!cancelled) setLoading(false);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   if (error) {
-    return <div className="text-red-600 dark:text-red-400">{error}</div>;
-  }
-  if (!stats) {
-    return <div className="text-slate-500">Loading dashboard…</div>;
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-error-600 dark:text-error-400">{error}</p>
+      </div>
+    );
   }
 
-  const cards = [
-    { label: 'Leads', value: stats.leads, hint: 'All time' },
-    { label: 'Bookings', value: stats.bookings, hint: 'Confirmed slots' },
+  const statCards = stats ? [
     {
-      label: 'Revenue',
-      value: `₹${stats.revenue.toLocaleString('en-IN')}`,
-      hint: 'Paid customer UPI (marked)',
+      title: 'Total Leads',
+      value: stats.leads?.toLocaleString() ?? '—',
+      icon: Users,
+      iconColor: 'brand',
+      subtitle: 'All time',
+      sparklineData: stats.leadsOverTime?.slice(-7).map(d => ({ v: d.count })),
+      trend: stats.leadsGrowth != null ? { value: stats.leadsGrowth, label: 'vs last week' } : undefined,
     },
-  ];
+    {
+      title: 'Bookings',
+      value: stats.bookings?.toLocaleString() ?? '—',
+      icon: CalendarDays,
+      iconColor: 'info',
+      subtitle: 'Confirmed slots',
+    },
+    {
+      title: 'Revenue',
+      value: formatINR(stats.revenue),
+      icon: IndianRupee,
+      iconColor: 'success',
+      subtitle: 'Paid (marked)',
+    },
+    {
+      title: 'Active Chats',
+      value: recentChats.length?.toString() ?? '—',
+      icon: MessageSquare,
+      iconColor: 'purple',
+      subtitle: 'Recent threads',
+    },
+  ] : [];
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Dashboard</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">Overview for your WhatsApp assistant.</p>
+    <div className="space-y-6">
+      <PageHeader
+        title="Dashboard"
+        subtitle="Overview of your WhatsApp business"
+      />
+
+      {/* Stat Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {loading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton.StatCard key={i} />
+            ))
+          : statCards.map((s) => (
+              <StatCard key={s.title} {...s} />
+            ))
+        }
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        {cards.map((c) => (
-          <div
-            key={c.label}
-            className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm"
-          >
-            <div className="text-sm font-medium text-slate-500">{c.label}</div>
-            <div className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">{c.value}</div>
-            <div className="mt-1 text-xs text-slate-400">{c.hint}</div>
-          </div>
-        ))}
+      <div className="grid gap-6 lg:grid-cols-5">
+        {/* Today's Schedule — 3 cols */}
+        <div className="lg:col-span-3">
+          <Card>
+            <Card.Header
+              title="Today's schedule"
+              subtitle={
+                scheduling
+                  ? `${scheduling.todayCount ?? 0} today · ${scheduling.weekCount ?? 0} this week`
+                  : undefined
+              }
+              action={
+                <Link
+                  to="/scheduling?tab=appointments"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
+                >
+                  View all <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              }
+            />
+            <Card.Body className="p-0">
+              {loading ? (
+                <div className="divide-y divide-neutral-50 dark:divide-neutral-800/50">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="px-5 py-4 flex items-center gap-3">
+                      <Skeleton.Avatar size="sm" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-3.5 w-28 rounded" />
+                        <Skeleton className="h-3 w-20 rounded" />
+                      </div>
+                      <Skeleton className="h-5 w-16 rounded-full" />
+                    </div>
+                  ))}
+                </div>
+              ) : scheduling?.upcoming?.length ? (
+                <ul className="divide-y divide-neutral-50 dark:divide-neutral-800/50">
+                  {scheduling.upcoming.map((a) => (
+                    <li key={a.id}>
+                      <Link
+                        to={`/scheduling?tab=appointments&appt=${encodeURIComponent(a.id)}`}
+                        className="flex items-center gap-3 px-5 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition-colors"
+                      >
+                        <Avatar name={a.customer?.name || a.customer?.phone} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
+                            {a.customer?.name || a.customer?.phone}
+                          </p>
+                          <p className="text-xs text-neutral-500 truncate">
+                            {a.service?.name}{a.staff?.name ? ` · ${a.staff.name}` : ''}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <AppointmentStatusBadge status={a.status} size="sm" />
+                          <span className="text-2xs text-neutral-400">
+                            {new Date(a.startAt).toLocaleTimeString(undefined, {
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-10 text-center px-5">
+                  <CalendarDays className="w-8 h-8 text-neutral-300 dark:text-neutral-700 mb-2" />
+                  <p className="text-sm text-neutral-500">No upcoming appointments today</p>
+                </div>
+              )}
+            </Card.Body>
+          </Card>
+        </div>
+
+        {/* Recent Chats — 2 cols */}
+        <div className="lg:col-span-2">
+          <Card className="h-full">
+            <Card.Header
+              title="Recent chats"
+              action={
+                <Link
+                  to="/conversations"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 transition-colors"
+                >
+                  Inbox <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              }
+            />
+            <Card.Body className="p-0">
+              {loading ? (
+                <div className="divide-y divide-neutral-50 dark:divide-neutral-800/50">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="px-4 py-3.5 flex items-start gap-3">
+                      <Skeleton.Avatar size="sm" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-3.5 w-24 rounded" />
+                        <Skeleton className="h-3 w-full rounded" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : recentChats.length ? (
+                <ul className="divide-y divide-neutral-50 dark:divide-neutral-800/50">
+                  {recentChats.map((t) => (
+                    <li key={t.id}>
+                      <Link
+                        to={`/conversations?customer=${encodeURIComponent(t.id)}`}
+                        className="flex items-start gap-3 px-4 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800/40 transition-colors"
+                      >
+                        <div className="relative shrink-0 mt-0.5">
+                          <Avatar name={t.name || 'User'} size="sm" />
+                          {t.inboxUnreadCount > 0 && (
+                            <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand-500 ring-2 ring-white dark:ring-neutral-900" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className={`text-sm font-medium truncate ${t.inboxUnreadCount > 0 ? 'text-neutral-900 dark:text-neutral-50' : 'text-neutral-700 dark:text-neutral-300'}`}>
+                              {t.name || 'Unknown'}
+                            </span>
+                            <span className="text-2xs text-neutral-400 shrink-0">
+                              {formatRelativeTime(t.lastMessage?.createdAt)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-neutral-500 truncate mt-0.5">
+                            {t.lastMessage?.type === 'BOT' && (
+                              <Bot className="w-3 h-3 inline mr-1 text-purple-400" />
+                            )}
+                            {t.lastMessage?.type === 'STAFF' && (
+                              <User className="w-3 h-3 inline mr-1 text-brand-400" />
+                            )}
+                            {previewText(t.lastMessage?.content || '', 60)}
+                          </p>
+                          {t.inboxUnreadCount > 0 && (
+                            <span className="inline-flex min-w-[18px] justify-center rounded-full bg-brand-500 text-white text-[10px] font-bold px-1.5 py-0.5 mt-1">
+                              {t.inboxUnreadCount > 99 ? '99+' : t.inboxUnreadCount}
+                            </span>
+                          )}
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-10 text-center px-4">
+                  <MessageSquare className="w-8 h-8 text-neutral-300 dark:text-neutral-700 mb-2" />
+                  <p className="text-sm text-neutral-500">No recent conversations</p>
+                </div>
+              )}
+            </Card.Body>
+          </Card>
+        </div>
       </div>
 
-      {scheduling && (
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Today&apos;s schedule</h2>
-              <p className="text-sm text-slate-500 mt-0.5">
-                {scheduling.todayCount} today · {scheduling.weekCount} this week
-              </p>
+      {/* Leads chart */}
+      <Card>
+        <Card.Header title="New leads (last 30 days)" />
+        <Card.Body>
+          {loading ? (
+            <div className="h-60 flex items-center justify-center">
+              <Skeleton className="w-full h-full rounded-lg" />
             </div>
-            <Link
-              to="/scheduling?tab=appointments"
-              className="text-sm font-semibold text-brand-700 dark:text-brand-400 hover:underline"
-            >
-              Open scheduling →
-            </Link>
-          </div>
-          <ul className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
-            {(scheduling.upcoming || []).map((a) => (
-              <li key={a.id} className="py-3 flex flex-wrap justify-between gap-2 text-sm">
-                <div>
-                  <Link
-                    to={`/scheduling?tab=appointments&appt=${encodeURIComponent(a.id)}`}
-                    className="font-medium text-slate-900 dark:text-white hover:text-brand-600"
-                  >
-                    {a.customer?.name || a.customer?.phone}
-                  </Link>
-                  <div className="text-xs text-slate-500">
-                    {a.service?.name} · {a.staff?.name}
-                  </div>
-                </div>
-                <div className="text-right text-slate-600 dark:text-slate-300">
-                  <div>{a.status}</div>
-                  <div className="text-xs">
-                    {new Date(a.startAt).toLocaleString(undefined, {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </div>
-                </div>
-              </li>
-            ))}
-            {!scheduling.upcoming?.length && (
-              <li className="py-6 text-center text-slate-500 text-sm">No upcoming appointments.</li>
-            )}
-          </ul>
-        </div>
-      )}
-
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Recent chats</h2>
-          <Link
-            to="/conversations"
-            className="text-sm font-semibold text-brand-700 dark:text-brand-400 hover:underline"
-          >
-            Open inbox →
-          </Link>
-        </div>
-        <ul className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
-          {recentChats.map((t) => (
-            <li key={t.id}>
-              <Link
-                to={`/conversations?customer=${encodeURIComponent(t.id)}`}
-                className={[
-                  'flex gap-3 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 -mx-2 px-2 rounded-xl transition-colors',
-                  t.inboxUnreadCount > 0 ? 'border-l-4 border-l-sky-500 pl-1.5' : '',
-                ].join(' ')}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-900 dark:text-white truncate">
-                    {t.name || 'Unknown'}
-                  </div>
-                  <div className="text-xs text-slate-500 font-mono truncate">{t.phone}</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400 truncate mt-0.5">
-                    {t.lastMessage?.type === 'USER'
-                      ? ''
-                      : t.lastMessage?.type === 'STAFF'
-                        ? 'You: '
-                        : 'Bot: '}
-                    {previewText(t.lastMessage?.content || '', 80)}
-                  </div>
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    <SessionBadge status={t.sessionStatus} />
-                    <MessageBadge status={t.messageStatus} />
-                  </div>
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0 pt-0.5">
-                  <div className="text-xs text-slate-400">
-                    {t.lastMessage?.createdAt
-                      ? new Date(t.lastMessage.createdAt).toLocaleString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: 'numeric',
-                          minute: '2-digit',
-                        })
-                      : ''}
-                  </div>
-                  {t.inboxUnreadCount > 0 ? (
-                    <span className="inline-flex min-w-[1.25rem] justify-center rounded-full bg-sky-600 text-white text-[10px] font-bold px-1.5 py-0.5">
-                      {t.inboxUnreadCount > 99 ? '99+' : t.inboxUnreadCount}
-                    </span>
-                  ) : null}
-                </div>
-              </Link>
-            </li>
-          ))}
-          {!recentChats.length && (
-            <li className="py-8 text-center text-sm text-slate-500">
-              No WhatsApp threads yet. When customers message you, open{' '}
-              <Link className="font-semibold text-brand-700 dark:text-brand-400" to="/conversations">
-                Chats
-              </Link>{' '}
-              to reply from the web.
-            </li>
+          ) : (
+            <div className="h-60">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={stats?.leadsOverTime || []} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="leadFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#10b981" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid {...chartTheme.grid} />
+                  <XAxis
+                    dataKey="date"
+                    tick={chartTheme.axisTick}
+                    axisLine={chartTheme.axisLine}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    tick={chartTheme.axisTick}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={chartTheme.tooltip.contentStyle}
+                    labelStyle={chartTheme.tooltip.labelStyle}
+                    cursor={chartTheme.tooltip.cursor}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="count"
+                    stroke="#059669"
+                    strokeWidth={2}
+                    fill="url(#leadFill)"
+                    dot={false}
+                    activeDot={{ r: 4, strokeWidth: 0, fill: '#059669' }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           )}
-        </ul>
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Leads (last 30 days)</h2>
-        <div className="h-72 mt-4">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={stats.leadsOverTime}>
-              <defs>
-                <linearGradient id="leadFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.35} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#33415522" />
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="#64748b" />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} stroke="#64748b" />
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 12,
-                  borderColor: '#e2e8f0',
-                  background: 'rgba(255,255,255,0.95)',
-                }}
-              />
-              <Area type="monotone" dataKey="count" stroke="#059669" fill="url(#leadFill)" strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+        </Card.Body>
+      </Card>
     </div>
   );
 }
