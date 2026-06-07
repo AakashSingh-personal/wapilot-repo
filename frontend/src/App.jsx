@@ -15,6 +15,10 @@ import Dashboard from './pages/Dashboard.jsx';
 import Customers from './pages/Customers.jsx';
 import Conversations from './pages/Conversations.jsx';
 import Bookings from './pages/Bookings.jsx';
+import Scheduling from './pages/Scheduling.jsx';
+import StaffSchedule from './pages/StaffSchedule.jsx';
+import ManageAppointment from './pages/ManageAppointment.jsx';
+import PublicBook from './pages/PublicBook.jsx';
 import Payments from './pages/Payments.jsx';
 import Billing from './pages/Billing.jsx';
 import Settings from './pages/Settings.jsx';
@@ -42,6 +46,8 @@ export default function App() {
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms-and-conditions" element={<TermsConditions />} />
         <Route path="/refund-policy" element={<RefundPolicy />} />
+        <Route path="/appointments/manage" element={<ManageAppointment />} />
+        <Route path="/book" element={<PublicBook />} />
       </Route>
 
       <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />} />
@@ -66,6 +72,8 @@ export default function App() {
         <Route path="/customers" element={<Customers />} />
         <Route path="/conversations" element={<Conversations />} />
         <Route path="/bookings" element={<Bookings />} />
+        <Route path="/scheduling" element={<Scheduling />} />
+        <Route path="/staff-schedule" element={<StaffSchedule />} />
         <Route path="/payments" element={<Payments />} />
         <Route path="/communications" element={<Navigate to="/communications/wallet" replace />} />
         <Route path="/communications/wallet" element={<Communications forcedTab="WALLET" />} />

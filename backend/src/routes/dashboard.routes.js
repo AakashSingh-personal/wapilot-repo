@@ -13,6 +13,7 @@ router.patch(
   dashboardController.patchConversationAiControl,
 );
 router.get('/customers', dashboardController.listCustomers);
+router.patch('/customers/:customerId', dashboardController.patchCustomer);
 router.get('/leads', dashboardController.listLeads);
 router.get('/messages/:customerId', dashboardController.messagesForCustomer);
 router.get('/messages/media/:mediaId', dashboardController.whatsappMedia);

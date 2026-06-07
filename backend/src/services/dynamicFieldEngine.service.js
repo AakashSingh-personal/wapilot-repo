@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { parseCatalog } from '../utils/businessCatalog.js';
+import { getCustomerAppointmentStats } from '../scheduling/customerStats.service.js';
 
 /**
  * Maps dotted / namespaced keys from templates to canonical snake_case keys.
@@ -56,16 +57,30 @@ export const ALL_ENGINE_KEYS = [
   'current_time',
   'current_appointment_date',
   'current_appointment_time',
+  'current_appointment_id',
+  'current_appointment_status',
+  'current_appointment_staff',
   'current_service_name',
   'current_staff_name',
+  'appointment_amount',
+  'amount_paid',
+  'amount_due',
+  'staff_name',
+  'staff_designation',
+  'staff_email',
+  'staff_phone',
   'current_booking_id',
   'current_booking_status',
   'current_booking_amount',
   'last_appointment_date',
+  'last_appointment_staff',
+  'last_appointment_service',
   'last_service_name',
   'last_staff_name',
   'last_booking_amount',
   'next_appointment_date',
+  'next_appointment_time',
+  'next_appointment_staff',
   'next_service_name',
   'last_payment_amount',
   'last_payment_date',
@@ -172,7 +187,7 @@ export async function buildTemplateContext({
       select: { email: true },
     }));
 
-  const [wallet, spendAgg, lastTopup, subscription, bookings, payments] = await Promise.all([
+  const [wallet, spendAgg, lastTopup, subscription, bookings, appointments, payments] = await Promise.all([
     prisma.wallet.findUnique({ where: { businessId } }),
     prisma.walletTransaction.aggregate({
       where: { businessId, type: 'DEBIT' },
@@ -190,6 +205,14 @@ export async function buildTemplateContext({
       ? prisma.booking.findMany({
           where: { customerId, businessId },
           orderBy: { createdAt: 'desc' },
+          take: 20,
+        })
+      : [],
+    customerId
+      ? prisma.appointment.findMany({
+          where: { customerId, businessId },
+          include: { staff: true, service: true, location: true },
+          orderBy: { startAt: 'desc' },
           take: 20,
         })
       : [],
@@ -215,7 +238,7 @@ export async function buildTemplateContext({
   ctx.name = ctx.customer_name;
   ctx.customer_phone = String(customer?.phone || contactPhone || '').trim();
   ctx.phone = ctx.customer_phone;
-  ctx.customer_email = '';
+  ctx.customer_email = String(customer?.email || '').trim();
 
   ctx.business_name = String(clientProfile.business_name || business?.name || '').trim();
   ctx.business_phone = String(clientProfile.business_phone || process.env.BUSINESS_DISPLAY_PHONE || '').trim();
@@ -233,32 +256,75 @@ export async function buildTemplateContext({
   ctx.current_plan = subscription ? planLabel(subscription.plan) : '';
   ctx.subscription_expiry = subscription?.expiresAt ? formatDisplayDate(subscription.expiresAt) : '';
 
+  const apptUpcoming = (appointments || []).filter((a) =>
+    ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(a.status) && new Date(a.startAt) >= now,
+  );
+  const apptPast = (appointments || []).filter((a) =>
+    ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(a.status) || new Date(a.startAt) < now,
+  );
+  const curAppt = apptUpcoming[0] || appointments?.[0] || null;
+  const prevAppt = apptPast.find((a) => a.status === 'COMPLETED') || apptPast[0] || null;
+  const nextAppt = apptUpcoming[1] || apptUpcoming[0] || null;
+
   const confirmed = (bookings || []).filter((b) => b.status === 'CONFIRMED');
   const pending = (bookings || []).filter((b) => b.status === 'PENDING');
-  const cur = confirmed[0] || null;
-  const prev = confirmed[1] || null;
-  const nextP = pending.length
+  const cur = curAppt || confirmed[0] || null;
+  const prev = prevAppt || confirmed[1] || null;
+  const nextP = nextAppt || (pending.length
     ? [...pending].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0]
-    : null;
+    : null);
 
   if (cur) {
-    ctx.current_appointment_date = formatDisplayDate(cur.createdAt);
-    ctx.current_appointment_time = String(cur.slot || '').trim() || formatDisplayTime(cur.createdAt);
-    ctx.current_service_name = String(cur.service || '').trim();
-    ctx.current_staff_name = '';
-    ctx.current_booking_id = formatBookingRef(cur.id);
-    ctx.current_booking_status = String(cur.status || '');
-    ctx.current_booking_amount = '';
+    if (cur.startAt) {
+      ctx.current_appointment_id = cur.appointmentNumber || formatBookingRef(cur.id);
+      ctx.current_appointment_date = formatDisplayDate(cur.startAt);
+      ctx.current_appointment_time = formatDisplayTime(cur.startAt);
+      ctx.current_appointment_status = String(cur.status || '');
+      ctx.current_appointment_staff = String(cur.staff?.name || '');
+      ctx.current_service_name = String(cur.service?.name || cur.service || '').trim();
+      ctx.current_staff_name = ctx.current_appointment_staff;
+      ctx.appointment_amount = formatMoney(cur.amount);
+      ctx.amount_paid = formatMoney(cur.amountPaid);
+      ctx.amount_due = formatMoney(cur.amountDue);
+      ctx.payment_status = String(cur.paymentStatus || '');
+      ctx.staff_name = ctx.current_appointment_staff;
+      ctx.staff_designation = String(cur.staff?.designation || '');
+      ctx.staff_email = String(cur.staff?.email || '');
+      ctx.staff_phone = String(cur.staff?.mobile || '');
+    } else {
+      ctx.current_appointment_date = formatDisplayDate(cur.createdAt);
+      ctx.current_appointment_time = String(cur.slot || '').trim() || formatDisplayTime(cur.createdAt);
+      ctx.current_service_name = String(cur.service || '').trim();
+      ctx.current_staff_name = '';
+      ctx.current_booking_id = formatBookingRef(cur.id);
+      ctx.current_booking_status = String(cur.status || '');
+      ctx.current_booking_amount = '';
+    }
   }
   if (prev) {
-    ctx.last_appointment_date = formatDisplayDate(prev.createdAt);
-    ctx.last_service_name = String(prev.service || '').trim();
-    ctx.last_staff_name = '';
-    ctx.last_booking_amount = '';
+    if (prev.startAt) {
+      ctx.last_appointment_date = formatDisplayDate(prev.startAt);
+      ctx.last_appointment_staff = String(prev.staff?.name || '');
+      ctx.last_appointment_service = String(prev.service?.name || '');
+      ctx.last_service_name = ctx.last_appointment_service;
+      ctx.last_staff_name = ctx.last_appointment_staff;
+    } else {
+      ctx.last_appointment_date = formatDisplayDate(prev.createdAt);
+      ctx.last_service_name = String(prev.service || '').trim();
+      ctx.last_staff_name = '';
+      ctx.last_booking_amount = '';
+    }
   }
   if (nextP) {
-    ctx.next_appointment_date = formatDisplayDate(nextP.createdAt);
-    ctx.next_service_name = String(nextP.service || '').trim();
+    if (nextP.startAt) {
+      ctx.next_appointment_date = formatDisplayDate(nextP.startAt);
+      ctx.next_appointment_time = formatDisplayTime(nextP.startAt);
+      ctx.next_appointment_staff = String(nextP.staff?.name || '');
+      ctx.next_service_name = String(nextP.service?.name || '');
+    } else {
+      ctx.next_appointment_date = formatDisplayDate(nextP.createdAt);
+      ctx.next_service_name = String(nextP.service || '').trim();
+    }
   }
 
   if (payments?.length) {
@@ -277,6 +343,19 @@ export async function buildTemplateContext({
     }
     ctx.total_amount_paid = formatMoney(paidSum);
     ctx.pending_amount = formatMoney(pendingSum);
+  }
+
+  if (customerId) {
+    try {
+      const stats = await getCustomerAppointmentStats(businessId, customerId);
+      if (stats) {
+        ctx.total_visits = String(stats.totalVisits);
+        ctx.lifetime_spend = formatMoney(stats.lifetimeSpend);
+        ctx.customer_avg_rating = stats.avgRating != null ? String(stats.avgRating) : '';
+      }
+    } catch {
+      // Stats are optional
+    }
   }
 
   return ctx;

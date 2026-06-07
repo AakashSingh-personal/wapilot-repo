@@ -4,6 +4,7 @@ import authRoutes from './routes/auth.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import apiRoutes from './routes/api.routes.js';
+import schedulingRoutes from './routes/scheduling.routes.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 import { log } from './utils/logger.js';
 import { isAllowedOrigin } from './utils/originAllowlist.js';
@@ -31,6 +32,7 @@ export function createApp() {
 
   app.use('/auth', authRoutes);
   app.use('/dashboard', dashboardRoutes);
+  app.use('/', schedulingRoutes);
   app.use('/', apiRoutes);
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

@@ -47,6 +47,11 @@ export function isRealtimeClusterEnabled() {
   return Boolean(pub && sub);
 }
 
+/** Shared Redis client for short-lived locks (slot booking). Null when Redis is off. */
+export function getRedisClient() {
+  return pub;
+}
+
 /**
  * Publish one realtime envelope to Redis; every app instance subscriber fans out to local WebSockets.
  * @param {string} businessId

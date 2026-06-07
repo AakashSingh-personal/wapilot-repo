@@ -1,0 +1,12 @@
+{
+  "name": "wapilot-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:scheduling": "playwright test tests/scheduling-public.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

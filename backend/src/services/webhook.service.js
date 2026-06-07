@@ -5,11 +5,8 @@ import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
 import { detectIntent } from './intent.service.js';
 import { generateAIReply } from './openai.service.js';
-import {
-  formatSlotsMessage,
-  matchSlotSelection,
-  parseSlotsFromConfig,
-} from './bookingSlots.service.js';
+import { handleAiBookingMessage } from '../scheduling/aiBooking.service.js';
+import { isSchedulingLlmEnabled } from '../scheduling/aiBookingLlm.service.js';
 import { sendWhatsAppImageUrl, sendWhatsAppText } from './whatsapp.service.js';
 import { createRazorpayPaymentLink } from './razorpay.service.js';
 import { structuredContent, parseStructuredContent } from '../utils/waStructuredMessage.js';
@@ -68,11 +65,6 @@ function statusRank(status) {
   if (s === 'delivered') return 2;
   if (s === 'sent') return 1;
   return 0;
-}
-
-function isCancelBookingMessage(text) {
-  const t = String(text || '').toLowerCase();
-  return /\b(cancel|stop|not now|later|leave it|no booking)\b/.test(t);
 }
 
 function extractRequestedAmountInInr(text) {
@@ -307,82 +299,56 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
 
   const knowledge = aiKnowledgeFromConfig(cfg.services);
 
-  const slots = parseSlotsFromConfig(cfg.workingHours);
-  const pickedSlot = matchSlotSelection(textBody, slots);
   const intent = detectIntent(textBody);
   const history = await recentConversation(customer.id, business.id, 12);
   let replyText = '';
 
-  if (pickedSlot) {
-    let confirmed = false;
-    try {
-      await prisma.$transaction([
-        prisma.booking.create({
-          data: {
-            customerId: customer.id,
-            businessId: business.id,
-            service: pickedSlot.service,
-            slot: pickedSlot.slot,
-            status: 'CONFIRMED',
-          },
-        }),
-        prisma.lead.updateMany({
-          where: { customerId: customer.id, businessId: business.id },
-          data: { status: 'BOOKED' },
-        }),
-        prisma.customer.update({
-          where: { id: customer.id },
-          data: { bookingSlotSelectionPending: false },
-        }),
-      ]);
-      confirmed = true;
-    } catch (e) {
-      log('error', 'booking_create_failed', {
-        businessId: business.id,
-        customerId: customer.id,
-        slot: pickedSlot.slot,
-        message: e.message,
-      });
-    }
+  const schedulingIntents = new Set([
+    'BOOKING',
+    'NEXT_APPOINTMENT',
+    'LAST_APPOINTMENT',
+    'CANCEL_BOOKING',
+    'RESCHEDULE',
+    'WAITLIST',
+    'PAYMENT',
+    'PAYMENT_STATUS',
+    'CHECK_AVAILABILITY',
+  ]);
+  const useSchedulingEngine =
+    schedulingIntents.has(intent) ||
+    customer.bookingSlotSelectionPending ||
+    /\bwaitlist\b/i.test(textBody) ||
+    (intent === 'GENERAL' &&
+      isSchedulingLlmEnabled() &&
+      /\b(appointment|slot|book|available|cancel|reschedule|visit|haircut|consultation|tomorrow|today)\b/i.test(
+        textBody,
+      ));
 
-    if (confirmed) {
-      await publishInboxLive({
-        businessId: business.id,
-        customerId: customer.id,
-        type: EventType.CONVERSATION_UPDATED,
-        reason: 'booking_confirmed',
+  if (useSchedulingEngine) {
+    try {
+      const aiBooking = await handleAiBookingMessage({
+        business,
+        customer,
+        textBody,
+        intent,
+        conversationHistory: history,
       });
-      replyText = `Booking confirmed for ${pickedSlot.slot}! 🎉 See you soon.`;
-    } else {
-      replyText = `Sorry, booking confirm nahi ho payi.\n${formatSlotsMessage(slots)}`;
+      if (aiBooking?.replyText) {
+        replyText = aiBooking.replyText;
+        if (aiBooking.appointment) {
+          await publishInboxLive({
+            businessId: business.id,
+            customerId: customer.id,
+            type: EventType.CONVERSATION_UPDATED,
+            reason: 'booking_confirmed',
+          });
+        }
+      }
+    } catch (e) {
+      log('warn', 'ai_booking_failed', { message: e.message });
+      replyText = 'Sorry, booking is temporarily unavailable. Please try again in a moment.';
     }
-  } else if (intent === 'BOOKING') {
-    await prisma.customer.update({
-      where: { id: customer.id },
-      data: { bookingSlotSelectionPending: true },
-    });
-    await publishInboxLive({
-      businessId: business.id,
-      customerId: customer.id,
-      type: EventType.CONVERSATION_UPDATED,
-      reason: 'booking_intent',
-    });
-    replyText = formatSlotsMessage(slots);
-  } else if (customer.bookingSlotSelectionPending && isCancelBookingMessage(textBody)) {
-    await prisma.customer.update({
-      where: { id: customer.id },
-      data: { bookingSlotSelectionPending: false },
-    });
-    await publishInboxLive({
-      businessId: business.id,
-      customerId: customer.id,
-      type: EventType.CONVERSATION_UPDATED,
-      reason: 'booking_cancelled',
-    });
-    replyText = 'No problem, booking request cancelled. Jab chaho message kar do.';
-  } else if (customer.bookingSlotSelectionPending) {
-    replyText = `I am still holding your booking request.\n${formatSlotsMessage(slots)}`;
-  } else if (intent === 'PRICE_QUERY') {
+  } else if (!replyText && intent === 'PRICE_QUERY') {
     replyText = await generateAIReply(
       `Customer asked about pricing. Answer using only services/products JSON. Message: ${textBody}`,
       {
@@ -394,7 +360,7 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
         conversationHistory: history,
       },
     );
-  } else if (intent === 'PAYMENT_STATUS') {
+  } else if (!replyText && intent === 'PAYMENT_STATUS') {
     const latestPayment = await prisma.customerPayment.findFirst({
       where: {
         businessId: business.id,
@@ -417,7 +383,7 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
       const created = new Date(latestPayment.createdAt).toLocaleString('en-IN');
       replyText = `Your latest payment is still pending: Rs ${Number(latestPayment.amount).toFixed(2)}.\nRequested on ${created}.`;
     }
-  } else if (intent === 'PAYMENT') {
+  } else if (!replyText && intent === 'PAYMENT') {
     const requestedAmount = extractRequestedAmountInInr(textBody);
     const selectedServiceAmount = inferAmountFromSelectedService({
       text: textBody,
@@ -461,7 +427,7 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
       });
       replyText = 'Payment link abhi generate nahi ho pa raha. Please try again in a moment.';
     }
-  } else {
+  } else if (!replyText) {
     replyText = await generateAIReply(textBody, {
       services: knowledge.services,
       products: knowledge.products,

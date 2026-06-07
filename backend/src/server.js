@@ -4,6 +4,8 @@ import { createApp } from './app.js';
 import { log } from './utils/logger.js';
 import { attachRealtimeWebSocket } from './realtime/websocket.js';
 import { initRealtimeRedis } from './realtime/redisBridge.js';
+import { startSchedulingWorkers } from './scheduling/workers.registry.js';
+import { shouldStartWorkersInProcess } from './scheduling/queue.service.js';
 
 const port = Number(process.env.PORT || 3000);
 
@@ -15,8 +17,11 @@ async function main() {
 
   attachRealtimeWebSocket(server);
 
-  server.listen(port, () => {
-    log('info', 'server_listening', { port });
+  server.listen(port, async () => {
+    log('info', 'server_listening', { port, workerEnable: shouldStartWorkersInProcess() });
+    if (shouldStartWorkersInProcess()) {
+      await startSchedulingWorkers();
+    }
   });
 }
 

@@ -1,0 +1,21 @@
+-- CreateEnum
+DO $$ BEGIN
+  CREATE TYPE "AiResumeMode" AS ENUM ('NEW_MESSAGES_ONLY', 'LAST_CUSTOMER_MESSAGE');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+-- AlterTable
+ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "aiEnabled" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "aiOverride" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "aiOverrideByUserId" UUID;
+ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "aiOverrideAt" TIMESTAMP(3);
+ALTER TABLE "Customer" ADD COLUMN IF NOT EXISTS "aiResumeMode" "AiResumeMode";
+
+-- AddForeignKey
+DO $$ BEGIN
+  ALTER TABLE "Customer" ADD CONSTRAINT "Customer_aiOverrideByUserId_fkey"
+    FOREIGN KEY ("aiOverrideByUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;

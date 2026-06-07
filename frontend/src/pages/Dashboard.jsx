@@ -15,6 +15,7 @@ import {
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
+  const [scheduling, setScheduling] = useState(null);
   const [recentChats, setRecentChats] = useState([]);
   const [error, setError] = useState('');
 
@@ -26,6 +27,12 @@ export default function Dashboard() {
         if (!cancelled) setStats(data);
       } catch (e) {
         if (!cancelled) setError(e.response?.data?.error || 'Could not load stats');
+      }
+      try {
+        const { data } = await api.get('/scheduling/dashboard/summary');
+        if (!cancelled) setScheduling(data);
+      } catch {
+        if (!cancelled) setScheduling(null);
       }
       try {
         const { data } = await api.get('/dashboard/conversations?limit=6');
@@ -75,6 +82,57 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {scheduling && (
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Today&apos;s schedule</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {scheduling.todayCount} today · {scheduling.weekCount} this week
+              </p>
+            </div>
+            <Link
+              to="/scheduling?tab=appointments"
+              className="text-sm font-semibold text-brand-700 dark:text-brand-400 hover:underline"
+            >
+              Open scheduling →
+            </Link>
+          </div>
+          <ul className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
+            {(scheduling.upcoming || []).map((a) => (
+              <li key={a.id} className="py-3 flex flex-wrap justify-between gap-2 text-sm">
+                <div>
+                  <Link
+                    to={`/scheduling?tab=appointments&appt=${encodeURIComponent(a.id)}`}
+                    className="font-medium text-slate-900 dark:text-white hover:text-brand-600"
+                  >
+                    {a.customer?.name || a.customer?.phone}
+                  </Link>
+                  <div className="text-xs text-slate-500">
+                    {a.service?.name} · {a.staff?.name}
+                  </div>
+                </div>
+                <div className="text-right text-slate-600 dark:text-slate-300">
+                  <div>{a.status}</div>
+                  <div className="text-xs">
+                    {new Date(a.startAt).toLocaleString(undefined, {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </div>
+                </div>
+              </li>
+            ))}
+            {!scheduling.upcoming?.length && (
+              <li className="py-6 text-center text-slate-500 text-sm">No upcoming appointments.</li>
+            )}
+          </ul>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">

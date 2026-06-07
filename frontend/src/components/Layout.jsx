@@ -16,6 +16,8 @@ function buildNav(role) {
     { to: '/customers', label: 'Customers', icon: '👥' },
     { to: '/conversations', label: 'Chats', icon: '💬' },
     { to: '/bookings', label: 'Bookings', icon: '📅' },
+    { to: '/scheduling', label: 'Scheduling', icon: '🗓️' },
+    { to: '/staff-schedule', label: 'Staff day', icon: '📋' },
     { to: '/payments', label: 'Payments', icon: '💳' },
     { to: '/communications/wallet', label: 'Wallet', icon: '💰' },
     { to: '/communications/send', label: 'Send Communication', icon: '📤' },

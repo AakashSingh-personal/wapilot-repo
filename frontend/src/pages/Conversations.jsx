@@ -134,6 +134,9 @@ export default function Conversations() {
   const [aiNotice, setAiNotice] = useState('');
   const [showResumeAiModal, setShowResumeAiModal] = useState(false);
   const [resumeAiMode, setResumeAiMode] = useState('NEW_MESSAGES_ONLY');
+  const [editingCustomerProfile, setEditingCustomerProfile] = useState(false);
+  const [customerProfileDraft, setCustomerProfileDraft] = useState({ name: '', email: '' });
+  const [savingCustomerProfile, setSavingCustomerProfile] = useState(false);
   const [loadingAiControl, setLoadingAiControl] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [realtimeSyncError, setRealtimeSyncError] = useState('');
@@ -150,6 +153,7 @@ export default function Conversations() {
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
+    setEditingCustomerProfile(false);
   }, [selectedId]);
 
   const selected = useMemo(
@@ -630,6 +634,32 @@ export default function Conversations() {
     });
   }
 
+  function startEditCustomerProfile() {
+    if (!selected) return;
+    setCustomerProfileDraft({
+      name: selected.name || '',
+      email: selected.email || '',
+    });
+    setEditingCustomerProfile(true);
+  }
+
+  async function saveCustomerProfile(e) {
+    e.preventDefault();
+    if (!selectedId) return;
+    setSavingCustomerProfile(true);
+    setError('');
+    try {
+      const { data } = await api.patch(`/dashboard/customers/${selectedId}`, customerProfileDraft);
+      setThreads((prev) =>
+        prev.map((t) => (t.id === selectedId ? { ...t, name: data.name, email: data.email } : t)),
+      );
+      setEditingCustomerProfile(false);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not update customer');
+    }
+    setSavingCustomerProfile(false);
+  }
+
   return (
     <div className="space-y-4 -mx-2 sm:mx-0 max-w-6xl xl:max-w-[1100px]">
       <div>
@@ -791,6 +821,49 @@ export default function Conversations() {
                 {selected?.name || 'Select a chat'}
               </div>
               <div className="text-xs text-slate-500 font-mono truncate">{selected?.phone}</div>
+              {selected && !editingCustomerProfile ? (
+                <div className="text-xs text-slate-500 truncate flex items-center gap-1">
+                  <span>{selected.email || 'No email — add for reminders'}</span>
+                  <button
+                    type="button"
+                    onClick={startEditCustomerProfile}
+                    className="text-brand-600 font-semibold shrink-0"
+                  >
+                    Edit
+                  </button>
+                </div>
+              ) : null}
+              {selected && editingCustomerProfile ? (
+                <form onSubmit={saveCustomerProfile} className="flex flex-wrap gap-1.5 pt-1">
+                  <input
+                    className="rounded border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs min-w-[100px]"
+                    placeholder="Name"
+                    value={customerProfileDraft.name}
+                    onChange={(e) => setCustomerProfileDraft((d) => ({ ...d, name: e.target.value }))}
+                  />
+                  <input
+                    type="email"
+                    className="rounded border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs min-w-[140px]"
+                    placeholder="Email"
+                    value={customerProfileDraft.email}
+                    onChange={(e) => setCustomerProfileDraft((d) => ({ ...d, email: e.target.value }))}
+                  />
+                  <button
+                    type="submit"
+                    disabled={savingCustomerProfile}
+                    className="rounded bg-brand-600 text-white px-2 py-1 text-[10px] font-semibold disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingCustomerProfile(false)}
+                    className="rounded border px-2 py-1 text-[10px]"
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : null}
               {selected ? (
                 <div className="flex flex-wrap gap-1 pt-0.5 items-center">
                   <SessionBadge status={selected.sessionStatus} />

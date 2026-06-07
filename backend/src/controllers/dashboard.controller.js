@@ -85,14 +85,66 @@ export async function listCustomers(req, res, next) {
         id: true,
         phone: true,
         name: true,
+        email: true,
         createdAt: true,
         lastInboundCustomerMessageAt: true,
         inboxUnreadCount: true,
+        appointmentStats: {
+          select: {
+            totalVisits: true,
+            lifetimeSpend: true,
+            lastVisitAt: true,
+            avgRating: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
     res.json(customers);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function patchCustomer(req, res, next) {
+  try {
+    const { customerId } = req.params;
+    const businessId = req.user.businessId;
+    const { name, email } = req.body || {};
+
+    const existing = await prisma.customer.findFirst({
+      where: { id: customerId, businessId },
+    });
+    if (!existing) return res.status(404).json({ error: 'Customer not found' });
+
+    const data = {};
+    if (name !== undefined) data.name = String(name).trim() || null;
+    if (email !== undefined) {
+      const trimmed = String(email).trim();
+      if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+        return res.status(400).json({ error: 'Invalid email address' });
+      }
+      data.email = trimmed || null;
+    }
+    if (!Object.keys(data).length) {
+      return res.status(400).json({ error: 'Provide name and/or email to update' });
+    }
+
+    const updated = await prisma.customer.update({
+      where: { id: customerId },
+      data,
+      select: {
+        id: true,
+        phone: true,
+        name: true,
+        email: true,
+        createdAt: true,
+        lastInboundCustomerMessageAt: true,
+        inboxUnreadCount: true,
+      },
+    });
+    res.json(updated);
   } catch (e) {
     next(e);
   }
@@ -135,6 +187,7 @@ export async function listConversations(req, res, next) {
         c.id,
         c.phone,
         c.name,
+        c.email,
         c."createdAt",
         c."lastInboundCustomerMessageAt",
         c."inboxUnreadCount",
@@ -202,6 +255,7 @@ export async function listConversations(req, res, next) {
         id: row.id,
         phone: row.phone,
         name: row.name,
+        email: row.email,
         createdAt: row.createdAt,
         lastInboundCustomerMessageAt: row.lastInboundCustomerMessageAt,
         inboxUnreadCount: row.inboxUnreadCount,
@@ -418,12 +472,27 @@ export async function whatsappMedia(req, res, next) {
 
 export async function listBookings(req, res, next) {
   try {
-    const bookings = await prisma.booking.findMany({
-      where: { businessId: req.user.businessId },
-      include: { customer: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json(bookings);
+    const businessId = req.user.businessId;
+    const [legacy, appointments] = await Promise.all([
+      prisma.booking.findMany({
+        where: { businessId },
+        include: { customer: true },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      prisma.appointment.findMany({
+        where: { businessId },
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          staff: { select: { id: true, name: true } },
+          service: { select: { id: true, name: true, durationMin: true } },
+          location: { select: { id: true, name: true } },
+        },
+        orderBy: { startAt: 'desc' },
+        take: 200,
+      }),
+    ]);
+    res.json({ legacyBookings: legacy, appointments });
   } catch (e) {
     next(e);
   }

@@ -5,6 +5,7 @@ import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
 import { verifyRazorpayWebhookSignature } from '../services/razorpay.service.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
+import { settleAppointmentPaymentFromWebhook } from '../scheduling/appointmentPayment.service.js';
 
 export function verifyWebhook(req, res) {
   const mode = req.query['hub.mode'];
@@ -390,7 +391,15 @@ export async function receiveRazorpayWebhook(req, res) {
       const link = payload?.payment_link?.entity;
       const paymentEntity = payload?.payment?.entity;
       const linkId = link?.id;
+      const notes = link?.notes || paymentEntity?.notes || {};
       if (linkId) {
+        if (notes?.kind === 'appointment_payment') {
+          await settleAppointmentPaymentFromWebhook({
+            providerLinkId: linkId,
+            providerPaymentId: paymentEntity?.id || null,
+          });
+        }
+
         const cp = await prisma.customerPayment.findFirst({
           where: { providerLinkId: linkId },
         });

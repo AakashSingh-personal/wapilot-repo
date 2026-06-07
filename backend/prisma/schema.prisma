@@ -83,6 +83,66 @@ enum AiResumeMode {
   LAST_CUSTOMER_MESSAGE
 }
 
+enum StaffStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum LeaveType {
+  SICK
+  VACATION
+  EMERGENCY
+  HOLIDAY
+  OTHER
+}
+
+enum AppointmentType {
+  IN_PERSON
+  ONLINE
+  HOME_VISIT
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  RESCHEDULED
+  CANCELLED
+  NO_SHOW
+}
+
+enum ApptPaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+  FAILED
+}
+
+enum WaitlistStatus {
+  ACTIVE
+  NOTIFIED
+  BOOKED
+  EXPIRED
+  CANCELLED
+}
+
+enum ReminderChannel {
+  WHATSAPP
+  EMAIL
+  SMS
+}
+
+enum ReminderStatus {
+  SCHEDULED
+  SENT
+  FAILED
+  CANCELLED
+}
+
 model Business {
   id              String   @id @default(uuid()) @db.Uuid
   name            String
@@ -105,6 +165,14 @@ model Business {
   wallet           Wallet?
   walletTxns       WalletTransaction[]
   variableDefinitions VariableDefinition[]
+  locations        Location[]
+  staffMembers     StaffMember[]
+  scheduledServices ScheduledService[]
+  serviceCategories ServiceCategory[]
+  appointments     Appointment[]
+  businessHolidays BusinessHoliday[]
+  waitlistEntries  WaitlistEntry[]
+  calendarConnections CalendarConnection[]
 }
 
 model User {
@@ -117,6 +185,7 @@ model User {
 
   business              Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
   aiPausedConversations Customer[] @relation("CustomerAiOverrideBy")
+  staffProfile          StaffMember?
 
   @@index([businessId])
 }
@@ -124,6 +193,7 @@ model User {
 model Customer {
   id                           String    @id @default(uuid()) @db.Uuid
   phone                        String
+  email                        String?
   name                         String?
   businessId                   String    @db.Uuid
   bookingSlotSelectionPending  Boolean   @default(false)
@@ -143,8 +213,13 @@ model Customer {
   leads    Lead[]
   messages Message[]
   bookings Booking[]
+  appointments Appointment[]
+  waitlistEntries WaitlistEntry[]
+  appointmentRatings AppointmentRating[]
+  aiBookingSession AiBookingSession?
   payments CustomerPayment[]
   variableValues CustomerVariableValue[]
+  appointmentStats CustomerAppointmentStats?
 
   @@unique([businessId, phone])
   @@index([businessId])
@@ -196,7 +271,477 @@ model Booking {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
-  @@index([businessId, customerId, createdAt(sort: Desc)])
+  @@index([businessId, createdAt(sort: Desc)])
+}
+
+model Location {
+  id           String    @id @default(uuid()) @db.Uuid
+  businessId   String    @db.Uuid
+  code         String
+  name         String
+  addressLine1 String?
+  city         String?
+  state        String?
+  country      String    @default("IN")
+  postalCode   String?
+  latitude     Decimal?  @db.Decimal(10, 7)
+  longitude    Decimal?  @db.Decimal(10, 7)
+  timezone     String    @default("Asia/Kolkata")
+  phone        String?
+  email        String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  staffLinks   StaffLocation[]
+  appointments Appointment[]
+  waitlist     WaitlistEntry[]
+  holidays     BusinessHoliday[]
+  workingHours StaffWorkingHours[]
+
+  @@unique([businessId, code])
+  @@index([businessId])
+}
+
+model StaffMember {
+  id             String      @id @default(uuid()) @db.Uuid
+  businessId     String      @db.Uuid
+  userId         String?     @unique @db.Uuid
+  staffCode      String
+  name           String
+  email          String?
+  mobile         String?
+  profilePicture String?
+  designation    String?
+  department     String?
+  bio            String?
+  skills         Json        @default("[]")
+  activeStatus   StaffStatus @default(ACTIVE)
+  createdById    String?     @db.Uuid
+  updatedById    String?     @db.Uuid
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  business       Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user           User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  locations      StaffLocation[]
+  services       StaffService[]
+  workingHours   StaffWorkingHours[]
+  breaks         StaffBreak[]
+  leaves         StaffLeave[]
+  availabilityRules StaffAvailabilityRule[]
+  appointments   Appointment[]
+  waitlistPrefs  WaitlistEntry[]
+  calendarBlocks CalendarBlockedSlot[]
+  calendarConns  CalendarConnection[]
+  ratings        AppointmentRating[]
+
+  @@unique([businessId, staffCode])
+  @@index([businessId, activeStatus])
+}
+
+model StaffLocation {
+  staffId    String  @db.Uuid
+  locationId String  @db.Uuid
+  isPrimary  Boolean @default(false)
+
+  staff    StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  location Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([staffId, locationId])
+}
+
+model ServiceCategory {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  name       String
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+
+  business Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  services ScheduledService[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+}
+
+model ScheduledService {
+  id            String   @id @default(uuid()) @db.Uuid
+  businessId    String   @db.Uuid
+  categoryId    String?  @db.Uuid
+  code          String
+  name          String
+  description   String?
+  durationMin   Int
+  price         Decimal  @default(0) @db.Decimal(12, 2)
+  taxPercent    Decimal  @default(0) @db.Decimal(5, 2)
+  bufferBefore  Int      @default(0)
+  bufferAfter   Int      @default(0)
+  maxCapacity   Int      @default(1)
+  rebookingIntervalDays Int?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  business     Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  category     ServiceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  staffLinks   StaffService[]
+  appointments Appointment[]
+  waitlist     WaitlistEntry[]
+  ratings      AppointmentRating[]
+
+  @@unique([businessId, code])
+  @@index([businessId, isActive])
+}
+
+model StaffService {
+  staffId   String @db.Uuid
+  serviceId String @db.Uuid
+
+  staff   StaffMember      @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  service ScheduledService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([staffId, serviceId])
+}
+
+model StaffWorkingHours {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  staffId    String   @db.Uuid
+  locationId String?  @db.Uuid
+  dayOfWeek  Int
+  startTime  String
+  endTime    String
+  isActive   Boolean  @default(true)
+
+  staff    StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  location Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([staffId, dayOfWeek])
+}
+
+model StaffBreak {
+  id           String    @id @default(uuid()) @db.Uuid
+  staffId      String    @db.Uuid
+  locationId   String?   @db.Uuid
+  dayOfWeek    Int?
+  startTime    String
+  endTime      String
+  breakType    String    @default("LUNCH")
+  isRecurring  Boolean   @default(true)
+  specificDate DateTime?
+
+  staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+}
+
+model StaffLeave {
+  id          String    @id @default(uuid()) @db.Uuid
+  businessId  String    @db.Uuid
+  staffId     String    @db.Uuid
+  leaveType   LeaveType
+  startAt     DateTime
+  endAt       DateTime
+  reason      String?
+  approvedById String?  @db.Uuid
+  createdAt   DateTime  @default(now())
+
+  staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, startAt, endAt])
+}
+
+model BusinessHoliday {
+  id          String    @id @default(uuid()) @db.Uuid
+  businessId  String    @db.Uuid
+  locationId  String?   @db.Uuid
+  name        String
+  startAt     DateTime
+  endAt       DateTime
+  isRecurring Boolean   @default(false)
+  rrule       String?
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, startAt])
+}
+
+model Appointment {
+  id                 String            @id @default(uuid()) @db.Uuid
+  businessId         String            @db.Uuid
+  appointmentNumber  String
+  customerId         String            @db.Uuid
+  staffId            String            @db.Uuid
+  serviceId          String            @db.Uuid
+  locationId         String            @db.Uuid
+  appointmentType    AppointmentType   @default(IN_PERSON)
+  startAt            DateTime
+  endAt              DateTime
+  bufferBeforeMin    Int               @default(0)
+  bufferAfterMin     Int               @default(0)
+  status             AppointmentStatus @default(CONFIRMED)
+  notes              String?
+  internalNotes      String?
+  meetingLink        String?
+  address            String?
+  latitude           Decimal?          @db.Decimal(10, 7)
+  longitude          Decimal?          @db.Decimal(10, 7)
+  paymentStatus      ApptPaymentStatus @default(UNPAID)
+  amount             Decimal           @default(0) @db.Decimal(12, 2)
+  amountPaid         Decimal           @default(0) @db.Decimal(12, 2)
+  amountDue          Decimal           @default(0) @db.Decimal(12, 2)
+  source             String            @default("DASHBOARD")
+  version            Int               @default(1)
+  cancelledAt        DateTime?
+  cancellationReason String?
+  checkedInAt        DateTime?
+  completedAt        DateTime?
+  legacyBookingId    String?           @db.Uuid
+  calendarEventId      String?
+  calendarConnectionId String?           @db.Uuid
+  createdById        String?           @db.Uuid
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  business   Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  staff      StaffMember      @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  service    ScheduledService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  location   Location         @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  payments   AppointmentPayment[]
+  reminders  ReminderSchedule[]
+  rating     AppointmentRating?
+  statusHistory AppointmentStatusHistory[]
+  idempotencyKeys BookingIdempotencyKey[]
+  calendarEvents AppointmentCalendarEvent[]
+
+  @@unique([businessId, appointmentNumber])
+  @@index([businessId, staffId, startAt])
+  @@index([businessId, customerId, startAt(sort: Desc)])
+  @@index([businessId, locationId, startAt])
+  @@index([businessId, status, startAt])
+}
+
+model CustomerAppointmentStats {
+  id                String    @id @default(uuid()) @db.Uuid
+  businessId        String    @db.Uuid
+  customerId        String    @unique @db.Uuid
+  totalVisits       Int       @default(0)
+  lifetimeSpend     Decimal   @default(0) @db.Decimal(12, 2)
+  lastVisitAt       DateTime?
+  nextVisitAt       DateTime?
+  favoriteStaffId   String?   @db.Uuid
+  favoriteServiceId String?   @db.Uuid
+  avgRating         Decimal?  @db.Decimal(3, 2)
+  updatedAt         DateTime  @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, customerId])
+  @@index([businessId])
+}
+
+model AppointmentStatusHistory {
+  id            String            @id @default(uuid()) @db.Uuid
+  appointmentId String            @db.Uuid
+  fromStatus    AppointmentStatus?
+  toStatus      AppointmentStatus
+  changedById   String?           @db.Uuid
+  reason        String?
+  createdAt     DateTime          @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+}
+
+model WaitlistEntry {
+  id             String         @id @default(uuid()) @db.Uuid
+  businessId     String         @db.Uuid
+  customerId     String         @db.Uuid
+  serviceId      String         @db.Uuid
+  staffId        String?        @db.Uuid
+  locationId     String         @db.Uuid
+  preferredDate  DateTime?
+  preferredStart String?
+  preferredEnd   String?
+  priorityScore  Int            @default(100)
+  status         WaitlistStatus @default(ACTIVE)
+  notifiedAt     DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime       @default(now())
+
+  business Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service  ScheduledService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  staff    StaffMember?     @relation(fields: [staffId], references: [id], onDelete: SetNull)
+  location Location         @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, serviceId, locationId, status])
+}
+
+model AppointmentPayment {
+  id            String            @id @default(uuid()) @db.Uuid
+  businessId    String            @db.Uuid
+  appointmentId String            @db.Uuid
+  amount        Decimal           @db.Decimal(12, 2)
+  paymentMethod String
+  transactionId String?
+  provider      String?
+  providerRef   String?
+  status        ApptPaymentStatus @default(UNPAID)
+  paidAt        DateTime?
+  metadata      Json              @default("{}")
+  createdAt     DateTime          @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+}
+
+model ReminderSchedule {
+  id            String          @id @default(uuid()) @db.Uuid
+  businessId    String          @db.Uuid
+  appointmentId String          @db.Uuid
+  channel       ReminderChannel @default(WHATSAPP)
+  scheduledAt   DateTime
+  offsetMinutes Int
+  status        ReminderStatus  @default(SCHEDULED)
+  payload       Json            @default("{}")
+  sentAt        DateTime?
+  failureReason String?
+  createdAt     DateTime        @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+}
+
+model BookingIdempotencyKey {
+  id             String   @id @default(uuid()) @db.Uuid
+  businessId     String   @db.Uuid
+  idempotencyKey String
+  appointmentId  String?  @db.Uuid
+  status         String   @default("IN_PROGRESS")
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  @@unique([businessId, idempotencyKey])
+  @@index([expiresAt])
+}
+
+model AppointmentRating {
+  id            String   @id @default(uuid()) @db.Uuid
+  businessId    String   @db.Uuid
+  appointmentId String   @unique @db.Uuid
+  customerId    String   @db.Uuid
+  staffId       String   @db.Uuid
+  serviceId     String   @db.Uuid
+  rating        Int
+  feedback      String?
+  createdAt     DateTime @default(now())
+
+  appointment Appointment      @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  staff       StaffMember      @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  service     ScheduledService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+}
+
+model AiBookingSession {
+  id             String   @id @default(uuid()) @db.Uuid
+  businessId     String   @db.Uuid
+  customerId     String   @unique @db.Uuid
+  intent         String   @default("BOOK")
+  state          Json     @default("{}")
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+}
+
+model CalendarConnection {
+  id              String   @id @default(uuid()) @db.Uuid
+  businessId      String   @db.Uuid
+  staffId         String?  @db.Uuid
+  provider        String
+  externalEmail   String?
+  accessToken     String?
+  refreshToken    String?
+  tokenExpiresAt  DateTime?
+  calendarId      String?
+  syncDirection   String   @default("BIDIRECTIONAL")
+  lastSyncAt      DateTime?
+  webhookChannelId String?
+  webhookResourceId String?
+  webhookExpiresAt DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  staff    StaffMember? @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  blocks   CalendarBlockedSlot[]
+  appointmentEvents AppointmentCalendarEvent[]
+}
+
+model AppointmentCalendarEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  businessId      String   @db.Uuid
+  appointmentId   String   @db.Uuid
+  connectionId    String   @db.Uuid
+  provider        String
+  externalEventId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  appointment Appointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  connection  CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([appointmentId, connectionId])
+  @@index([businessId, appointmentId])
+  @@index([connectionId, externalEventId])
+}
+
+model CalendarBlockedSlot {
+  id              String   @id @default(uuid()) @db.Uuid
+  businessId      String   @db.Uuid
+  staffId         String   @db.Uuid
+  connectionId    String   @db.Uuid
+  externalEventId String
+  startAt         DateTime
+  endAt           DateTime
+  title           String?
+  source          String   @default("EXTERNAL")
+
+  staff      StaffMember        @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  connection CalendarConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalEventId])
+  @@index([staffId, startAt, endAt])
+}
+
+model StaffAvailabilityRule {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  staffId    String   @db.Uuid
+  locationId String?  @db.Uuid
+  ruleType   String   @default("AVAILABLE")
+  rrule      String
+  startTime  String?
+  endTime    String?
+  timezone   String   @default("Asia/Kolkata")
+  validFrom  DateTime?
+  validUntil DateTime?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, isActive])
 }
 
 model BusinessConfig {
@@ -206,6 +751,7 @@ model BusinessConfig {
   workingHours      String   @default("{}")
   autoReplyEnabled  Boolean  @default(true)
   upiId             String?
+  schedulingSettings Json    @default("{}")
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }

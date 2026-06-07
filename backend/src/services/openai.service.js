@@ -17,7 +17,7 @@ function resolveProvider() {
 }
 
 /** @returns {{ client: OpenAI; model: string; provider: 'groq' | 'openai' } | null} */
-function createLlmClient() {
+export function createLlmClient() {
   const provider = resolveProvider();
   if (!provider) return null;
 
