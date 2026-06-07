@@ -27,6 +27,7 @@ const FOCUSABLE = [
 
 export function Modal({
   open,
+  isOpen,
   onClose,
   title,
   subtitle,
@@ -37,6 +38,7 @@ export function Modal({
   children,
   footer,
 }) {
+  const visible = open ?? isOpen ?? false;
   const panelRef = useRef(null);
   const previousFocus = useRef(null);
 
@@ -61,7 +63,7 @@ export function Modal({
   );
 
   useEffect(() => {
-    if (open) {
+    if (visible) {
       previousFocus.current = document.activeElement;
       document.body.style.overflow = 'hidden';
       setTimeout(() => panelRef.current?.querySelector(FOCUSABLE)?.focus(), 50);
@@ -75,9 +77,9 @@ export function Modal({
       document.body.style.overflow = '';
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open, handleKeyDown]);
+  }, [visible, handleKeyDown]);
 
-  if (!open) return null;
+  if (!visible) return null;
 
   return (
     <div

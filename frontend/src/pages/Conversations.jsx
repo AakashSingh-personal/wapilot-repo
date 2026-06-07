@@ -1212,7 +1212,7 @@ export default function Conversations() {
 
       {/* Resume AI modal */}
       <Modal
-        isOpen={showResumeAiModal}
+        open={showResumeAiModal}
         onClose={() => setShowResumeAiModal(false)}
         title="Resume AI"
         size="sm"

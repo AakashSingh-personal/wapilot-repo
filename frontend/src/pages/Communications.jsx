@@ -1502,7 +1502,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
 
       {/* ── Clone modal ─────────────────────────────────────────────────── */}
       <Modal
-        isOpen={!!cloneSource}
+        open={!!cloneSource}
         onClose={() => setCloneSource(null)}
         title="Clone template"
         size="sm"
@@ -1530,7 +1530,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
 
       {/* ── Variable mapping modal ──────────────────────────────────────── */}
       <Modal
-        isOpen={!!mappingModalId}
+        open={!!mappingModalId}
         onClose={() => setMappingModalId('')}
         title="Map numbered placeholders"
         size="md"
