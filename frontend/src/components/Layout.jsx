@@ -162,6 +162,9 @@ export default function Layout() {
             </button>
           </div>
           {!sidebarCollapsed && <div className="text-xs text-slate-400 truncate">{user?.email}</div>}
+          {!sidebarCollapsed && (
+            <div className="text-[10px] text-slate-400 mt-1">App v{import.meta.env.VITE_APP_VERSION || '1.1.0'}</div>
+          )}
         </div>
         <nav className="flex-1 p-3 space-y-1">{renderNav(sidebarCollapsed)}</nav>
         <div className="p-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
@@ -207,6 +210,15 @@ export default function Layout() {
           <div className="font-semibold text-slate-900 dark:text-white">WAPilot</div>
         </div>
         <div className="max-w-6xl mx-auto p-4 md:p-8">
+          {!import.meta.env.VITE_API_URL &&
+            typeof window !== 'undefined' &&
+            !window.location.hostname.includes('localhost') && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 px-3 py-2 text-sm">
+                API URL is not configured for this build. Set{' '}
+                <code className="font-mono text-xs">VITE_API_URL=https://wapilot-repo.onrender.com</code>{' '}
+                in Cloudflare Pages → Settings → Environment variables, then redeploy.
+              </div>
+            )}
           <Outlet />
         </div>
       </main>

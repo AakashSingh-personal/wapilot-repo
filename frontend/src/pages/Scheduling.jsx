@@ -384,15 +384,6 @@ export default function Scheduling() {
     }
   }, [loadCalendar]);
 
-  const loadSchedSettings = useCallback(async () => {
-    try {
-      const { data } = await api.get('/scheduling/settings');
-      setSchedSettings(data);
-    } catch {
-      setSchedSettings(null);
-    }
-  }, []);
-
   useEffect(() => {
     if (tab !== 'notifications') return;
     void loadSchedSettings();
