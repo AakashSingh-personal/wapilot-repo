@@ -3,6 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../services/api.js';
 import { subscribeRealtime, onReconnect } from '../realtime/socket.js';
 import StaffAvailabilityPanel from '../components/StaffAvailabilityPanel.jsx';
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { PageHeader } from '../components/ui/PageHeader.jsx';
 
 const TABS = [
   { id: 'appointments', label: 'Appointments' },
@@ -1279,18 +1281,26 @@ export default function Scheduling() {
   }
 
   return (
-    <div className="space-y-6 max-w-6xl">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Scheduling</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Staff, services, smart slots, appointments, waitlist, and WhatsApp AI booking.
-        </p>
-      </div>
+    <div className="space-y-5 max-w-6xl">
+      <PageHeader
+        title="Scheduling"
+        subtitle="Staff, services, smart slots, appointments, waitlist, and WhatsApp AI booking."
+      />
 
-      {error && <div className="rounded-lg bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm px-3 py-2">{error}</div>}
-      {info && <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/35 text-emerald-800 dark:text-emerald-200 text-sm px-3 py-2">{info}</div>}
+      {error && (
+        <div className="flex items-start gap-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm px-4 py-3">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          {error}
+        </div>
+      )}
+      {info && (
+        <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-sm px-4 py-3">
+          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+          {info}
+        </div>
+      )}
 
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+      <div className="flex flex-wrap gap-1.5 border-b border-neutral-200 dark:border-neutral-800 pb-3">
         {TABS.map((t) => {
           const badge =
             t.id === 'appointments' && pendingCount > 0
@@ -1304,10 +1314,10 @@ export default function Scheduling() {
               type="button"
               onClick={() => switchTab(t.id)}
               className={[
-                'rounded-lg px-3 py-1.5 text-sm font-medium inline-flex items-center gap-1.5',
+                'rounded-xl px-3.5 py-2 text-sm font-medium inline-flex items-center gap-1.5 transition-colors',
                 tab === t.id
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300',
+                  ? 'bg-brand-600 text-white shadow-sm'
+                  : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700',
               ].join(' ')}
             >
               {t.label}
@@ -1327,7 +1337,10 @@ export default function Scheduling() {
       </div>
 
       {loading ? (
-        <div className="text-slate-500 text-sm">Loading…</div>
+        <div className="flex items-center gap-2.5 text-sm text-neutral-500 py-4">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Loading scheduling data…
+        </div>
       ) : tab === 'appointments' ? (
         <div className="space-y-6">
           <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">

@@ -3,6 +3,19 @@ import { flushSync } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api.js';
 import { subscribeRealtime } from '../realtime/socket.js';
+import {
+  Wallet as WalletIcon, Send as SendIcon, FileText, Variable, Users, BookOpen,
+  Plus, Trash2, RefreshCw, Copy, Edit3, AlertCircle, CheckCircle2,
+  ChevronDown, ArrowRight, Loader2,
+} from 'lucide-react';
+import { PageHeader } from '../components/ui/PageHeader.jsx';
+import { Card } from '../components/ui/Card.jsx';
+import { Button } from '../components/ui/Button.jsx';
+import { Badge } from '../components/ui/Badge.jsx';
+import { Modal } from '../components/ui/Modal.jsx';
+import { Checkbox } from '../components/ui/Checkbox.jsx';
+
+// ── helpers ───────────────────────────────────────────────────────────────
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -10,48 +23,32 @@ function asArray(value) {
 
 function metaStatusBadgeClass(status) {
   const normalized = String(status || '').toUpperCase();
-  if (normalized === 'APPROVED') {
-    return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
-  }
-  if (normalized === 'PENDING' || normalized === 'IN_REVIEW') {
-    return 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
-  }
-  if (normalized === 'REJECTED') {
-    return 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300';
-  }
-  return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+  if (normalized === 'APPROVED') return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300';
+  if (normalized === 'PENDING' || normalized === 'IN_REVIEW') return 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+  if (normalized === 'REJECTED') return 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300';
+  return 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300';
 }
 
 const BUILTIN_CATEGORY_ORDER = ['SYSTEM', 'BUSINESS', 'CUSTOMER', 'APPOINTMENT', 'PAYMENT'];
 
 function insertAtCursor(textareaRef, snippet, setValue) {
   const el = textareaRef?.current;
-  if (!el) {
-    setValue((prev) => String(prev || '') + snippet);
-    return;
-  }
+  if (!el) { setValue((prev) => String(prev || '') + snippet); return; }
   const start = typeof el.selectionStart === 'number' ? el.selectionStart : el.value.length;
   const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : el.value.length;
   const v = el.value;
   const next = v.slice(0, start) + snippet + v.slice(end);
-  flushSync(() => {
-    setValue(next);
-  });
+  flushSync(() => { setValue(next); });
   requestAnimationFrame(() => {
     el.focus();
     const pos = start + snippet.length;
-    try {
-      el.setSelectionRange(pos, pos);
-    } catch {
-      /* ignore */
-    }
+    try { el.setSelectionRange(pos, pos); } catch { /* ignore */ }
   });
 }
 
 function displayMetaStatus(status) {
   const normalized = String(status || '').toUpperCase();
   if (!normalized) return 'NOT_FOUND';
-  // Meta API often reports "PENDING" while UI labels this state as "In review".
   if (normalized === 'PENDING') return 'IN_REVIEW';
   return normalized;
 }
@@ -66,37 +63,25 @@ const META_LIMITS = {
   PHONE_BUTTONS_MAX: 1,
 };
 
+const inputCls =
+  'w-full rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-950 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500 transition-colors';
+
+// ── component ─────────────────────────────────────────────────────────────
+
 export default function Communications({ forcedTab = null, templateMode = 'combined' }) {
   const params = useParams();
   const editTemplateId = templateMode === 'edit' ? params.templateId : null;
   const TXN_PAGE_SIZE = 20;
   const tabs = ['WALLET', 'SEND', 'TEMPLATES', 'FIELDS', 'CONTACTS', 'CONTACT_BOOK'];
   const tabMeta = {
-    WALLET: {
-      title: 'Wallet',
-      subtitle: 'Check balance, add money, and review wallet transactions.',
-    },
-    SEND: {
-      title: 'Send Communication',
-      subtitle: 'Send approved templates to one contact or in bulk.',
-    },
-    TEMPLATES: {
-      title: 'Templates',
-      subtitle: 'Create templates, review status, and sync updates from Meta.',
-    },
-    FIELDS: {
-      title: 'Personalization fields',
-      subtitle: 'Business-wide and per-customer values. Map Meta {{1}} placeholders to friendly keys on each template.',
-    },
-    CONTACTS: {
-      title: 'Upload Contacts',
-      subtitle: 'Upload contact CSV data for campaign and bulk communication.',
-    },
-    CONTACT_BOOK: {
-      title: 'Contact Book',
-      subtitle: 'View uploaded contacts with payments and booking history.',
-    },
+    WALLET: { title: 'Wallet', subtitle: 'Check balance, add money, and review wallet transactions.' },
+    SEND: { title: 'Send Communication', subtitle: 'Send approved templates to one contact or in bulk.' },
+    TEMPLATES: { title: 'Templates', subtitle: 'Create templates, review status, and sync updates from Meta.' },
+    FIELDS: { title: 'Personalization fields', subtitle: 'Business-wide and per-customer values. Map Meta {{1}} placeholders to friendly keys.' },
+    CONTACTS: { title: 'Upload Contacts', subtitle: 'Upload contact CSV data for campaign and bulk communication.' },
+    CONTACT_BOOK: { title: 'Contact Book', subtitle: 'View uploaded contacts with payments and booking history.' },
   };
+
   const [wallet, setWallet] = useState(null);
   const [walletTxns, setWalletTxns] = useState([]);
   const [txnFilter, setTxnFilter] = useState('ALL');
@@ -110,12 +95,8 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   const [contactBookLoading, setContactBookLoading] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [tabFeedback, setTabFeedback] = useState(() =>
-    tabs.reduce((acc, tab) => {
-      acc[tab] = { error: '', info: '' };
-      return acc;
-    }, {}),
+    tabs.reduce((acc, tab) => { acc[tab] = { error: '', info: '' }; return acc; }, {}),
   );
-
   const [addAmount, setAddAmount] = useState('');
   const [addingMoney, setAddingMoney] = useState(false);
   const [csvText, setCsvText] = useState('');
@@ -141,7 +122,6 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     categories: ['MARKETING', 'UTILITY', 'AUTHENTICATION'],
     languages: ['en_US'],
   });
-
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [selectedContactId, setSelectedContactId] = useState('');
   const [bulkMode, setBulkMode] = useState(false);
@@ -170,9 +150,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   const templateBodyRef = useRef(null);
 
   useEffect(() => {
-    if (forcedTab && tabs.includes(forcedTab)) {
-      setActiveTab(forcedTab);
-    }
+    if (forcedTab && tabs.includes(forcedTab)) setActiveTab(forcedTab);
   }, [forcedTab]);
 
   const error = tabFeedback[activeTab]?.error || '';
@@ -201,24 +179,12 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   );
 
   useEffect(() => {
-    if (activeTab !== 'SEND') {
-      setSendPreview('');
-      return;
-    }
-    if (!selectedTemplateId || bulkMode) {
-      setSendPreview('');
-      return;
-    }
+    if (activeTab !== 'SEND') { setSendPreview(''); return; }
+    if (!selectedTemplateId || bulkMode) { setSendPreview(''); return; }
     const cid = selectedContactId;
-    if (!cid) {
-      setSendPreview('');
-      return;
-    }
+    if (!cid) { setSendPreview(''); return; }
     const c = contacts.find((x) => x.id === cid);
-    if (!c) {
-      setSendPreview('');
-      return;
-    }
+    if (!c) { setSendPreview(''); return; }
     let cancelled = false;
     (async () => {
       try {
@@ -227,13 +193,9 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
           contactPhone: c.phone,
         });
         if (!cancelled) setSendPreview(String(data?.preview || ''));
-      } catch {
-        if (!cancelled) setSendPreview('');
-      }
+      } catch { if (!cancelled) setSendPreview(''); }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [activeTab, selectedTemplateId, selectedContactId, bulkMode, contacts]);
 
   const builderValidationErrors = useMemo(() => {
@@ -241,78 +203,40 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     const body = templateContent.trim();
     if (!templateName.trim()) errs.push('Template name is required');
     if (!body) errs.push('Body text is required');
-    if (body.length > META_LIMITS.BODY_MAX) {
-      errs.push(`Body text must be ${META_LIMITS.BODY_MAX} characters or less`);
-    }
-
+    if (body.length > META_LIMITS.BODY_MAX) errs.push(`Body text must be ${META_LIMITS.BODY_MAX} characters or less`);
     if (includeHeader && headerFormat === 'TEXT') {
       const h = headerText.trim();
       if (!h) errs.push('Header text is required for TEXT header');
-      if (h.length > META_LIMITS.HEADER_TEXT_MAX) {
-        errs.push(`Header text must be ${META_LIMITS.HEADER_TEXT_MAX} characters or less`);
-      }
+      if (h.length > META_LIMITS.HEADER_TEXT_MAX) errs.push(`Header text must be ${META_LIMITS.HEADER_TEXT_MAX} characters or less`);
     }
-
     if (includeFooter && footerText.trim().length > META_LIMITS.FOOTER_TEXT_MAX) {
       errs.push(`Footer text must be ${META_LIMITS.FOOTER_TEXT_MAX} characters or less`);
     }
-
-    if (buttons.length > META_LIMITS.TOTAL_BUTTONS_MAX) {
-      errs.push(`Total buttons cannot exceed ${META_LIMITS.TOTAL_BUTTONS_MAX}`);
-    }
-
+    if (buttons.length > META_LIMITS.TOTAL_BUTTONS_MAX) errs.push(`Total buttons cannot exceed ${META_LIMITS.TOTAL_BUTTONS_MAX}`);
     const urlCount = buttons.filter((b) => b.type === 'URL').length;
     const phoneCount = buttons.filter((b) => b.type === 'PHONE_NUMBER').length;
-    if (urlCount > META_LIMITS.URL_BUTTONS_MAX) {
-      errs.push(`URL buttons cannot exceed ${META_LIMITS.URL_BUTTONS_MAX}`);
-    }
-    if (phoneCount > META_LIMITS.PHONE_BUTTONS_MAX) {
-      errs.push(`Phone number buttons cannot exceed ${META_LIMITS.PHONE_BUTTONS_MAX}`);
-    }
-
+    if (urlCount > META_LIMITS.URL_BUTTONS_MAX) errs.push(`URL buttons cannot exceed ${META_LIMITS.URL_BUTTONS_MAX}`);
+    if (phoneCount > META_LIMITS.PHONE_BUTTONS_MAX) errs.push(`Phone number buttons cannot exceed ${META_LIMITS.PHONE_BUTTONS_MAX}`);
     buttons.forEach((b, idx) => {
       const label = `Button ${idx + 1}`;
       const text = (b.text || '').trim();
       if (!text) errs.push(`${label}: text is required`);
-      if (text.length > META_LIMITS.BUTTON_TEXT_MAX) {
-        errs.push(`${label}: text must be ${META_LIMITS.BUTTON_TEXT_MAX} characters or less`);
-      }
+      if (text.length > META_LIMITS.BUTTON_TEXT_MAX) errs.push(`${label}: text must be ${META_LIMITS.BUTTON_TEXT_MAX} characters or less`);
       if (b.type === 'URL') {
         const url = (b.url || '').trim();
-        if (!url) {
-          errs.push(`${label}: URL is required`);
-        } else if (!/^https?:\/\/\S+$/i.test(url)) {
-          errs.push(`${label}: URL must start with http:// or https://`);
-        }
+        if (!url) errs.push(`${label}: URL is required`);
+        else if (!/^https?:\/\/\S+$/i.test(url)) errs.push(`${label}: URL must start with http:// or https://`);
       }
       if (b.type === 'PHONE_NUMBER') {
         const pn = (b.phoneNumber || '').trim();
-        if (!pn) {
-          errs.push(`${label}: phone number is required`);
-        } else if (!/^\+?[1-9]\d{7,14}$/.test(pn.replace(/\s+/g, ''))) {
-          errs.push(`${label}: phone number must be valid E.164 format`);
-        }
+        if (!pn) errs.push(`${label}: phone number is required`);
+        else if (!/^\+?[1-9]\d{7,14}$/.test(pn.replace(/\s+/g, ''))) errs.push(`${label}: phone number must be valid E.164 format`);
       }
     });
-
     return errs;
-  }, [
-    templateName,
-    templateContent,
-    includeHeader,
-    headerFormat,
-    headerText,
-    includeFooter,
-    footerText,
-    buttons,
-  ]);
+  }, [templateName, templateContent, includeHeader, headerFormat, headerText, includeFooter, footerText, buttons]);
 
-  async function loadWalletTransactions({
-    filter = txnFilter,
-    offset = 0,
-    append = false,
-    onlyTopups = txnOnlyTopups,
-  } = {}) {
+  async function loadWalletTransactions({ filter = txnFilter, offset = 0, append = false, onlyTopups = txnOnlyTopups } = {}) {
     setTxnLoading(true);
     try {
       const params = new URLSearchParams();
@@ -336,9 +260,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     setMessageCost(Number(data.messageCost || 2));
   }
 
-  async function ensureWalletLoaded() {
-    await refreshWallet();
-  }
+  async function ensureWalletLoaded() { await refreshWallet(); }
 
   async function reloadContactsFromApi() {
     try {
@@ -349,9 +271,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         if (prev && list.some((c) => c.id === prev)) return prev;
         return list[0]?.id || '';
       });
-    } catch {
-      /* keep existing list */
-    }
+    } catch { /* keep existing list */ }
   }
 
   async function reloadTemplatesFromApi() {
@@ -359,16 +279,12 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       const { data } = await api.get('/templates');
       const templatesData = asArray(data?.templates || data);
       setTemplates(templatesData);
-      if (data?.metaSyncError) {
-        setError(`Meta sync issue: ${data.metaSyncError}`, 'TEMPLATES');
-      }
+      if (data?.metaSyncError) setError(`Meta sync issue: ${data.metaSyncError}`, 'TEMPLATES');
       setSelectedTemplateId((prev) => {
         if (prev && templatesData.some((t) => t.id === prev)) return prev;
         return templatesData[0]?.id || '';
       });
-    } catch {
-      /* keep existing templates */
-    }
+    } catch { /* keep existing templates */ }
   }
 
   async function loadPersonalizationCatalog() {
@@ -382,26 +298,17 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
   }
 
   async function createFieldDefinition() {
-    setError('', 'FIELDS');
-    setInfo('', 'FIELDS');
-    setFieldsSaving(true);
+    setError('', 'FIELDS'); setInfo('', 'FIELDS'); setFieldsSaving(true);
     try {
       await api.post('/variables/definitions', {
-        key: newFieldKey.trim(),
-        label: newFieldLabel.trim(),
-        type: newFieldType,
-        defaultValue: newFieldDefault,
+        key: newFieldKey.trim(), label: newFieldLabel.trim(), type: newFieldType, defaultValue: newFieldDefault,
       });
-      setNewFieldKey('');
-      setNewFieldLabel('');
-      setNewFieldDefault('');
+      setNewFieldKey(''); setNewFieldLabel(''); setNewFieldDefault('');
       setInfo('Field created', 'FIELDS');
       await loadPersonalizationDefinitions();
     } catch (e) {
       setError(e.response?.data?.error || 'Could not create field', 'FIELDS');
-    } finally {
-      setFieldsSaving(false);
-    }
+    } finally { setFieldsSaving(false); }
   }
 
   async function deleteFieldDefinition(id) {
@@ -411,45 +318,26 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       await api.delete(`/variables/definitions/${id}`);
       setInfo('Field deleted', 'FIELDS');
       await loadPersonalizationDefinitions();
-    } catch (e) {
-      setError(e.response?.data?.error || 'Delete failed', 'FIELDS');
-    }
+    } catch (e) { setError(e.response?.data?.error || 'Delete failed', 'FIELDS'); }
   }
 
   async function importFieldCsv() {
-    setError('', 'FIELDS');
-    setInfo('', 'FIELDS');
-    const cols = fieldsVarCols
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!cols.length) {
-      setError('List variable column keys (comma-separated), matching CUSTOMER fields.', 'FIELDS');
-      return;
-    }
+    setError('', 'FIELDS'); setInfo('', 'FIELDS');
+    const cols = fieldsVarCols.split(',').map((s) => s.trim()).filter(Boolean);
+    if (!cols.length) { setError('List variable column keys (comma-separated), matching CUSTOMER fields.', 'FIELDS'); return; }
     setFieldsSaving(true);
     try {
       const { data } = await api.post('/variables/import-csv', {
-        csvText: fieldsCsvPaste,
-        phoneColumn: fieldsPhoneCol.trim() || 'phone',
-        variableColumns: cols,
+        csvText: fieldsCsvPaste, phoneColumn: fieldsPhoneCol.trim() || 'phone', variableColumns: cols,
       });
-      setInfo(
-        `Import done: ${data.customersUpdated} contact(s) updated, ${data.skipped} row(s) skipped.`,
-        'FIELDS',
-      );
+      setInfo(`Import done: ${data.customersUpdated} contact(s) updated, ${data.skipped} row(s) skipped.`, 'FIELDS');
       setFieldsCsvPaste('');
-    } catch (e) {
-      setError(e.response?.data?.error || 'Import failed', 'FIELDS');
-    } finally {
-      setFieldsSaving(false);
-    }
+    } catch (e) { setError(e.response?.data?.error || 'Import failed', 'FIELDS'); }
+    finally { setFieldsSaving(false); }
   }
 
   async function openMappingModal(templateId) {
-    setMappingModalId(templateId);
-    setMappingLoading(true);
-    setError('', 'TEMPLATES');
+    setMappingModalId(templateId); setMappingLoading(true); setError('', 'TEMPLATES');
     try {
       const [{ data: ph }, { data: mp }] = await Promise.all([
         api.get(`/templates/${templateId}/placeholders`),
@@ -457,18 +345,11 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       ]);
       const numbered = asArray(ph?.extracted?.numbered);
       const existing = new Map(asArray(mp?.mappings).map((m) => [m.placeholderIndex, m.variableKey]));
-      setMappingRows(
-        numbered.map((n) => ({
-          placeholderIndex: n,
-          variableKey: existing.get(n) || '',
-        })),
-      );
+      setMappingRows(numbered.map((n) => ({ placeholderIndex: n, variableKey: existing.get(n) || '' })));
     } catch (e) {
       setError(e.response?.data?.error || 'Could not load placeholders', 'TEMPLATES');
       setMappingModalId('');
-    } finally {
-      setMappingLoading(false);
-    }
+    } finally { setMappingLoading(false); }
   }
 
   async function saveTemplateMappings() {
@@ -477,37 +358,24 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     try {
       const mappings = mappingRows
         .filter((r) => r.variableKey && String(r.variableKey).trim())
-        .map((r) => ({
-          placeholderIndex: r.placeholderIndex,
-          variableKey: String(r.variableKey).trim(),
-        }));
+        .map((r) => ({ placeholderIndex: r.placeholderIndex, variableKey: String(r.variableKey).trim() }));
       await api.put(`/templates/${mappingModalId}/variable-mappings`, { mappings });
       setInfo('Template field mapping saved', 'TEMPLATES');
       setMappingModalId('');
-    } catch (e) {
-      setError(e.response?.data?.error || 'Save failed', 'TEMPLATES');
-    } finally {
-      setMappingLoading(false);
-    }
+    } catch (e) { setError(e.response?.data?.error || 'Save failed', 'TEMPLATES'); }
+    finally { setMappingLoading(false); }
   }
 
   const selectableVariableKeys = useMemo(() => {
     const s = new Set();
-    builtins.forEach((b) => {
-      s.add(b.key);
-      if (b.namespace && b.namespace !== b.key) s.add(b.namespace);
-    });
+    builtins.forEach((b) => { s.add(b.key); if (b.namespace && b.namespace !== b.key) s.add(b.namespace); });
     fieldDefs.forEach((d) => s.add(d.key));
     return [...s].sort();
   }, [builtins, fieldDefs]);
 
   const builtinsByCategory = useMemo(() => {
     const m = {};
-    builtins.forEach((b) => {
-      const c = b.category || 'SYSTEM';
-      if (!m[c]) m[c] = [];
-      m[c].push(b);
-    });
+    builtins.forEach((b) => { const c = b.category || 'SYSTEM'; if (!m[c]) m[c] = []; m[c].push(b); });
     return m;
   }, [builtins]);
 
@@ -517,22 +385,12 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     insertAtCursor(templateBodyRef, `{{${k}}}`, setTemplateContent);
   }
 
-  /** Refetch wallet, contacts, templates, contact book, and (when relevant) wallet transactions. */
   async function loadAll() {
     await refreshWallet();
     await reloadContactsFromApi();
     await reloadTemplatesFromApi();
-    try {
-      await loadContactBook();
-    } catch {
-      // Contact book is optional for send/upload flows.
-    }
-    await loadWalletTransactions({
-      filter: txnFilter,
-      offset: 0,
-      append: false,
-      onlyTopups: txnOnlyTopups,
-    }).catch(() => {});
+    try { await loadContactBook(); } catch { /* Contact book is optional */ }
+    await loadWalletTransactions({ filter: txnFilter, offset: 0, append: false, onlyTopups: txnOnlyTopups }).catch(() => {});
   }
 
   async function ensureContactsLoaded() {
@@ -548,9 +406,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     const { data } = await api.get('/templates');
     const templatesData = asArray(data?.templates || data);
     setTemplates(templatesData);
-    if (data?.metaSyncError) {
-      setError(`Meta sync issue: ${data.metaSyncError}`, 'TEMPLATES');
-    }
+    if (data?.metaSyncError) setError(`Meta sync issue: ${data.metaSyncError}`, 'TEMPLATES');
     setSelectedTemplateId((prev) => prev || templatesData?.[0]?.id || '');
   }
 
@@ -567,34 +423,26 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       setContactBookRows(asArray(data?.rows));
     } catch (e) {
       setError(e.response?.data?.error || 'Failed to load contact book', 'CONTACT_BOOK');
-    } finally {
-      setContactBookLoading(false);
-    }
+    } finally { setContactBookLoading(false); }
   }
 
   async function deleteContact(id) {
     if (!id) return;
     const ok = window.confirm('Delete this contact?');
     if (!ok) return;
-    setError('', 'CONTACT_BOOK');
-    setInfo('', 'CONTACT_BOOK');
+    setError('', 'CONTACT_BOOK'); setInfo('', 'CONTACT_BOOK');
     try {
       await api.delete(`/contacts/${id}`);
       setInfo('Contact deleted', 'CONTACT_BOOK');
       setContactBookRows((prev) => prev.filter((r) => r.id !== id));
       await loadContactBook();
-    } catch (e) {
-      setError(e.response?.data?.error || 'Failed to delete contact', 'CONTACT_BOOK');
-    }
+    } catch (e) { setError(e.response?.data?.error || 'Failed to delete contact', 'CONTACT_BOOK'); }
   }
 
   useEffect(() => {
     return subscribeRealtime((evt) => {
-      if (evt?.type === 'contacts_changed' && activeTab === 'CONTACT_BOOK') {
-        void loadContactBook();
-      }
+      if (evt?.type === 'contacts_changed' && activeTab === 'CONTACT_BOOK') void loadContactBook();
     });
-    // loadContactBook is stable within this page lifecycle
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -602,40 +450,23 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
     let cancelled = false;
     (async () => {
       try {
-        // Load only what each tab needs (avoid cross-tab API spam).
         if (activeTab === 'WALLET') {
           await ensureWalletLoaded();
-          if (!cancelled) {
-            await loadWalletTransactions({
-              filter: txnFilter,
-              offset: 0,
-              append: false,
-              onlyTopups: txnOnlyTopups,
-            });
-          }
+          if (!cancelled) await loadWalletTransactions({ filter: txnFilter, offset: 0, append: false, onlyTopups: txnOnlyTopups });
         } else if (activeTab === 'SEND') {
           await Promise.all([ensureWalletLoaded(), ensureContactsLoaded(), ensureTemplatesLoaded()]);
         } else if (activeTab === 'TEMPLATES') {
-          await Promise.all([
-            ensureTemplatesLoaded(),
-            ensureMetaTemplateOptionsLoaded(),
-            loadPersonalizationCatalog(),
-            loadPersonalizationDefinitions(),
-          ]);
+          await Promise.all([ensureTemplatesLoaded(), ensureMetaTemplateOptionsLoaded(), loadPersonalizationCatalog(), loadPersonalizationDefinitions()]);
         } else if (activeTab === 'FIELDS') {
           await Promise.all([loadPersonalizationCatalog(), loadPersonalizationDefinitions()]);
         } else if (activeTab === 'CONTACT_BOOK') {
           await loadContactBook();
-        } else if (activeTab === 'CONTACTS') {
-          // Upload page doesn't need list calls on every visit.
         }
       } catch (e) {
         if (!cancelled) setError(e.response?.data?.error || 'Failed to load communication data', activeTab);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, txnFilter, txnOnlyTopups]);
 
@@ -663,52 +494,20 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         for (const c of comps) {
           if (c.type === 'HEADER') {
             hasHeader = true;
-            if (c.format === 'TEXT') {
-              setHeaderFormat('TEXT');
-              setHeaderText(c.text || '');
-            } else {
-              setHeaderFormat(c.format || 'IMAGE');
-              const h = c.example?.header_handle?.[0];
-              setHeaderMediaUrl(h || '');
-            }
+            if (c.format === 'TEXT') { setHeaderFormat('TEXT'); setHeaderText(c.text || ''); }
+            else { setHeaderFormat(c.format || 'IMAGE'); const h = c.example?.header_handle?.[0]; setHeaderMediaUrl(h || ''); }
           }
           if (c.type === 'BODY') bodyFromSnap = c.text || '';
-          if (c.type === 'FOOTER') {
-            hasFooter = true;
-            setFooterText(c.text || '');
-          }
+          if (c.type === 'FOOTER') { hasFooter = true; setFooterText(c.text || ''); }
           if (c.type === 'BUTTONS' && Array.isArray(c.buttons)) {
             for (const b of c.buttons) {
-              if (b.type === 'QUICK_REPLY') {
-                snapButtons.push({
-                  id: crypto.randomUUID(),
-                  type: 'QUICK_REPLY',
-                  text: b.text || '',
-                  url: '',
-                  phoneNumber: '',
-                });
-              } else if (b.type === 'URL') {
-                snapButtons.push({
-                  id: crypto.randomUUID(),
-                  type: 'URL',
-                  text: b.text || '',
-                  url: b.url || '',
-                  phoneNumber: '',
-                });
-              } else if (b.type === 'PHONE_NUMBER') {
-                snapButtons.push({
-                  id: crypto.randomUUID(),
-                  type: 'PHONE_NUMBER',
-                  text: b.text || '',
-                  url: '',
-                  phoneNumber: b.phone_number || '',
-                });
-              }
+              if (b.type === 'QUICK_REPLY') snapButtons.push({ id: crypto.randomUUID(), type: 'QUICK_REPLY', text: b.text || '', url: '', phoneNumber: '' });
+              else if (b.type === 'URL') snapButtons.push({ id: crypto.randomUUID(), type: 'URL', text: b.text || '', url: b.url || '', phoneNumber: '' });
+              else if (b.type === 'PHONE_NUMBER') snapButtons.push({ id: crypto.randomUUID(), type: 'PHONE_NUMBER', text: b.text || '', url: '', phoneNumber: b.phone_number || '' });
             }
           }
         }
-        setIncludeHeader(hasHeader);
-        setIncludeFooter(hasFooter);
+        setIncludeHeader(hasHeader); setIncludeFooter(hasFooter);
         setTemplateContent(bodyFromSnap || tpl.content || '');
         setButtons(snapButtons);
       } catch (e) {
@@ -717,37 +516,26 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         if (!cancelled) setEditingTemplateLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateMode, editTemplateId]);
 
   async function addMoney() {
     if (!addAmount) return;
-    setError('');
-    setInfo('');
-    setAddingMoney(true);
+    setError(''); setInfo(''); setAddingMoney(true);
     try {
       const scriptLoaded = await new Promise((resolve) => {
         if (window.Razorpay) return resolve(true);
         const s = document.createElement('script');
         s.src = 'https://checkout.razorpay.com/v1/checkout.js';
-        s.onload = () => resolve(true);
-        s.onerror = () => resolve(false);
+        s.onload = () => resolve(true); s.onerror = () => resolve(false);
         document.body.appendChild(s);
       });
-      if (!scriptLoaded) {
-        setError('Could not load Razorpay checkout');
-        return;
-      }
+      if (!scriptLoaded) { setError('Could not load Razorpay checkout'); return; }
       const { data } = await api.post('/wallet/add-money', { amount: Number(addAmount) });
       const rzp = new window.Razorpay({
-        key: data.keyId,
-        amount: Math.round(Number(data.amount) * 100),
-        currency: data.currency || 'INR',
-        name: 'WAPilot',
-        description: 'Wallet top-up',
+        key: data.keyId, amount: Math.round(Number(data.amount) * 100),
+        currency: data.currency || 'INR', name: 'WAPilot', description: 'Wallet top-up',
         order_id: data.orderId,
         handler: async (resp) => {
           await api.patch(`/wallet/add-money/${data.paymentId}/verify`, {
@@ -755,81 +543,48 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
             razorpay_payment_id: resp.razorpay_payment_id,
             razorpay_signature: resp.razorpay_signature,
           });
-          setAddAmount('');
-          await loadAll();
-          setInfo('Wallet updated');
+          setAddAmount(''); await loadAll(); setInfo('Wallet updated');
         },
       });
       rzp.on('payment.failed', () => setError('Payment failed or cancelled'));
       rzp.open();
-    } catch (e) {
-      setError(e.response?.data?.error || 'Could not add money');
-    } finally {
-      setAddingMoney(false);
-    }
+    } catch (e) { setError(e.response?.data?.error || 'Could not add money'); }
+    finally { setAddingMoney(false); }
   }
 
   async function uploadContacts() {
     if (!csvText.trim()) return;
-    setError('');
-    setInfo('');
-    setUploadingContactsLoading(true);
+    setError(''); setInfo(''); setUploadingContactsLoading(true);
     try {
       const { data } = await api.post('/contacts/upload', { csvText });
-      setCsvText('');
-      setError('');
+      setCsvText(''); setError('');
       const n = Number(data?.inserted ?? 0);
-      setInfo(
-        n > 0
-          ? `Uploaded contacts: ${n} new row(s).`
-          : 'Upload completed — no new rows (numbers may already exist in your contact book).',
-      );
+      setInfo(n > 0 ? `Uploaded contacts: ${n} new row(s).` : 'Upload completed — no new rows (numbers may already exist in your contact book).');
       await loadAll().catch(() => {});
-    } catch (e) {
-      setError(e.response?.data?.error || 'Upload failed');
-    } finally {
-      setUploadingContactsLoading(false);
-    }
+    } catch (e) { setError(e.response?.data?.error || 'Upload failed'); }
+    finally { setUploadingContactsLoading(false); }
   }
 
   function buildComponentsForMeta() {
     const components = [];
     if (includeHeader) {
       if (headerFormat === 'TEXT') {
-        if (!headerText.trim()) {
-          return { error: 'Header text is required for TEXT header', components: null };
-        }
+        if (!headerText.trim()) return { error: 'Header text is required for TEXT header', components: null };
         components.push({ type: 'HEADER', format: 'TEXT', text: headerText.trim() });
       } else {
-        if (!headerMediaUrl.trim()) {
-          return { error: 'Upload media for non-text header', components: null };
-        }
-        if (!/\.[a-zA-Z0-9]{2,8}($|\?)/.test(headerMediaUrl.trim())) {
-          return { error: 'Header media URL must be a public file URL with extension', components: null };
-        }
-        components.push({
-          type: 'HEADER',
-          format: headerFormat,
-          example: {
-            header_handle: [headerMediaUrl.trim()],
-          },
-        });
+        if (!headerMediaUrl.trim()) return { error: 'Upload media for non-text header', components: null };
+        if (!/\.[a-zA-Z0-9]{2,8}($|\?)/.test(headerMediaUrl.trim())) return { error: 'Header media URL must be a public file URL with extension', components: null };
+        components.push({ type: 'HEADER', format: headerFormat, example: { header_handle: [headerMediaUrl.trim()] } });
       }
     }
     components.push({ type: 'BODY', text: templateContent.trim() });
-    if (includeFooter && footerText.trim()) {
-      components.push({ type: 'FOOTER', text: footerText.trim() });
-    }
+    if (includeFooter && footerText.trim()) components.push({ type: 'FOOTER', text: footerText.trim() });
     if (buttons.length) {
       components.push({
         type: 'BUTTONS',
         buttons: buttons.map((b) => {
-          if (b.type === 'QUICK_REPLY') {
-            return { type: 'QUICK_REPLY', text: b.text };
-          }
-          if (b.type === 'URL') {
-            return { type: 'URL', text: b.text, url: b.url };
-          }
+          if (b.type === 'QUICK_REPLY') return { type: 'QUICK_REPLY', text: b.text };
+          if (b.type === 'URL') return { type: 'URL', text: b.text, url: b.url };
           return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phoneNumber };
         }),
       });
@@ -839,181 +594,86 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
 
   async function createTemplate() {
     if (!templateName.trim()) return;
-    setError('');
-    setInfo('');
-    setTemplateValidationErrors([]);
-    setCreatingTemplate(true);
+    setError(''); setInfo(''); setTemplateValidationErrors([]); setCreatingTemplate(true);
     try {
-      if (builderValidationErrors.length) {
-        setTemplateValidationErrors(builderValidationErrors);
-        return;
-      }
+      if (builderValidationErrors.length) { setTemplateValidationErrors(builderValidationErrors); return; }
       const { error: compError, components } = buildComponentsForMeta();
-      if (compError) {
-        setError(compError);
-        return;
-      }
-      const parsedMetaPayload = { components };
+      if (compError) { setError(compError); return; }
       setTemplateValidationErrors([]);
-
-      await api.post('/templates', {
-        name: templateName,
-        content: templateContent,
-        category: templateCategory,
-        language: templateLanguage,
-        metaPayload: parsedMetaPayload,
-      });
-      setTemplateName('');
-      setTemplateContent('');
-      await loadAll();
-      setInfo('Template created');
-      if (templateMode === 'create') {
-        navigate('/communications/templates');
-      }
-    } catch (e) {
-      setError(e.response?.data?.error || 'Could not create template');
-    } finally {
-      setCreatingTemplate(false);
-    }
+      await api.post('/templates', { name: templateName, content: templateContent, category: templateCategory, language: templateLanguage, metaPayload: { components } });
+      setTemplateName(''); setTemplateContent('');
+      await loadAll(); setInfo('Template created');
+      if (templateMode === 'create') navigate('/communications/templates');
+    } catch (e) { setError(e.response?.data?.error || 'Could not create template'); }
+    finally { setCreatingTemplate(false); }
   }
 
   async function saveEditTemplate(publishToMeta) {
     if (!editTemplateId) return;
-    if (!templateName.trim()) {
-      setError('Template name is required', 'TEMPLATES');
-      return;
-    }
-    setError('');
-    setInfo('');
-    setTemplateValidationErrors([]);
-    if (publishToMeta && builderValidationErrors.length) {
-      setTemplateValidationErrors(builderValidationErrors);
-      return;
-    }
+    if (!templateName.trim()) { setError('Template name is required', 'TEMPLATES'); return; }
+    setError(''); setInfo(''); setTemplateValidationErrors([]);
+    if (publishToMeta && builderValidationErrors.length) { setTemplateValidationErrors(builderValidationErrors); return; }
     setSavingEditTemplate(true);
     try {
-      const body = {
-        name: templateName,
-        content: templateContent,
-        category: templateCategory,
-        language: templateLanguage,
-        publishToMeta: !!publishToMeta,
-      };
+      const body = { name: templateName, content: templateContent, category: templateCategory, language: templateLanguage, publishToMeta: !!publishToMeta };
       if (publishToMeta) {
         const { error: compError, components } = buildComponentsForMeta();
-        if (compError) {
-          setError(compError, 'TEMPLATES');
-          return;
-        }
+        if (compError) { setError(compError, 'TEMPLATES'); return; }
         body.metaPayload = { components };
       }
       await api.patch(`/templates/${editTemplateId}`, body);
       await loadAll();
-      setInfo(
-        publishToMeta ? 'Template updated and submitted to Meta' : 'Template saved locally',
-        'TEMPLATES',
-      );
+      setInfo(publishToMeta ? 'Template updated and submitted to Meta' : 'Template saved locally', 'TEMPLATES');
       navigate('/communications/templates');
-    } catch (e) {
-      setError(e.response?.data?.error || 'Could not save template', 'TEMPLATES');
-    } finally {
-      setSavingEditTemplate(false);
-    }
+    } catch (e) { setError(e.response?.data?.error || 'Could not save template', 'TEMPLATES'); }
+    finally { setSavingEditTemplate(false); }
   }
 
   async function submitClone() {
-    if (!cloneSource?.id || !cloneNewName.trim()) {
-      setError('Enter a name for the clone', 'TEMPLATES');
-      return;
-    }
-    setCloneSubmitting(true);
-    setError('');
-    setInfo('');
+    if (!cloneSource?.id || !cloneNewName.trim()) { setError('Enter a name for the clone', 'TEMPLATES'); return; }
+    setCloneSubmitting(true); setError(''); setInfo('');
     try {
-      await api.post(`/templates/${cloneSource.id}/clone`, {
-        name: cloneNewName.trim(),
-        createOnMeta: cloneOnMeta,
-      });
-      setCloneSource(null);
-      await reloadTemplatesFromApi();
-      setInfo('Template cloned', 'TEMPLATES');
-    } catch (e) {
-      setError(e.response?.data?.error || 'Could not clone template', 'TEMPLATES');
-    } finally {
-      setCloneSubmitting(false);
-    }
+      await api.post(`/templates/${cloneSource.id}/clone`, { name: cloneNewName.trim(), createOnMeta: cloneOnMeta });
+      setCloneSource(null); await reloadTemplatesFromApi(); setInfo('Template cloned', 'TEMPLATES');
+    } catch (e) { setError(e.response?.data?.error || 'Could not clone template', 'TEMPLATES'); }
+    finally { setCloneSubmitting(false); }
   }
 
   async function updateTemplateStatus(id) {
-    setError('');
-    setInfo('');
-    setSyncingTemplateId(id);
+    setError(''); setInfo(''); setSyncingTemplateId(id);
     try {
       const { data } = await api.patch(`/templates/${id}/status`);
-      await loadAll();
-      setInfo(`Template status synced from Meta: ${displayMetaStatus(data.metaStatus)}`);
-    } catch (e) {
-      setError(e.response?.data?.error || 'Could not update template status');
-    } finally {
-      setSyncingTemplateId('');
-    }
+      await loadAll(); setInfo(`Template status synced from Meta: ${displayMetaStatus(data.metaStatus)}`);
+    } catch (e) { setError(e.response?.data?.error || 'Could not update template status'); }
+    finally { setSyncingTemplateId(''); }
   }
 
   async function sendTemplate() {
-    setError('');
-    setInfo('');
-    if (!selectedTemplateId) {
-      setError('Select a template');
-      return;
-    }
-    if (bulkMode && !Object.values(selectedBulk).some(Boolean)) {
-      setError('Select at least one contact for bulk send');
-      return;
-    }
-    if (!bulkMode && !selectedContactId) {
-      setError('Select a contact');
-      return;
-    }
+    setError(''); setInfo('');
+    if (!selectedTemplateId) { setError('Select a template'); return; }
+    if (bulkMode && !Object.values(selectedBulk).some(Boolean)) { setError('Select at least one contact for bulk send'); return; }
+    if (!bulkMode && !selectedContactId) { setError('Select a contact'); return; }
     setSending(true);
     try {
-      const contactIds = bulkMode
-        ? contacts.filter((c) => selectedBulk[c.id]).map((c) => c.id)
-        : [selectedContactId];
-      const { data } = await api.post('/communications/send', {
-        templateId: selectedTemplateId,
-        contactIds,
-      });
+      const contactIds = bulkMode ? contacts.filter((c) => selectedBulk[c.id]).map((c) => c.id) : [selectedContactId];
+      const { data } = await api.post('/communications/send', { templateId: selectedTemplateId, contactIds });
       const fc = Number(data.failedCount) || 0;
       const sc = Number(data.sentCount) || 0;
-      const failedRows = Array.isArray(data.results)
-        ? data.results.filter((r) => r.status === 'failed')
-        : [];
-      const detail =
-        failedRows[0]?.error ||
-        data.error ||
-        (Array.isArray(data.blocked) && data.blocked[0]?.reason) ||
-        null;
-      if (sc === 0 && fc > 0) {
-        setError(detail || 'No messages were delivered. Check template approval and phone numbers (+country code).');
-        setInfo('');
-      } else {
+      const failedRows = Array.isArray(data.results) ? data.results.filter((r) => r.status === 'failed') : [];
+      const detail = failedRows[0]?.error || data.error || (Array.isArray(data.blocked) && data.blocked[0]?.reason) || null;
+      if (sc === 0 && fc > 0) { setError(detail || 'No messages were delivered. Check template approval and phone numbers (+country code).'); setInfo(''); }
+      else {
         setError('');
-        setInfo(
-          fc > 0
-            ? `Sent: ${sc}, Failed: ${fc}${detail ? ` — ${detail}` : ''}. Wallet: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`
-            : `Delivered: ${sc}. Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`,
-        );
+        setInfo(fc > 0
+          ? `Sent: ${sc}, Failed: ${fc}${detail ? ` — ${detail}` : ''}. Wallet: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`
+          : `Delivered: ${sc}. Wallet balance: ₹${Number(data.walletBalance).toLocaleString('en-IN')}`);
       }
       await loadAll().catch(() => {});
     } catch (e) {
       const d = e.response?.data;
-      const failedRow = Array.isArray(d?.results)
-        ? d.results.find((r) => r.status === 'failed')
-        : null;
+      const failedRow = Array.isArray(d?.results) ? d.results.find((r) => r.status === 'failed') : null;
       setError(failedRow?.error || d?.error || e.response?.data?.error || 'Send failed');
-    } finally {
-      setSending(false);
-    }
+    } finally { setSending(false); }
   }
 
   async function changeTxnFilter(next) {
@@ -1034,9 +694,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
 
   async function uploadHeaderMedia(file) {
     if (!file) return;
-    setError('');
-    setInfo('');
-    setHeaderMediaUploading(true);
+    setError(''); setInfo(''); setHeaderMediaUploading(true);
     try {
       const base64Data = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -1044,209 +702,332 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
         reader.onerror = () => reject(new Error('File read failed'));
         reader.readAsDataURL(file);
       });
-      const { data } = await api.post('/media/upload', {
-        base64Data,
-        mimeType: file.type || 'application/octet-stream',
-        fileName: file.name,
-      });
+      const { data } = await api.post('/media/upload', { base64Data, mimeType: file.type || 'application/octet-stream', fileName: file.name });
       setHeaderMediaUrl(data.publicUrl || '');
       setInfo('Header media uploaded to Supabase');
-    } catch (e) {
-      setError(e.response?.data?.error || 'Header media upload failed');
-    } finally {
-      setHeaderMediaUploading(false);
-    }
+    } catch (e) { setError(e.response?.data?.error || 'Header media upload failed'); }
+    finally { setHeaderMediaUploading(false); }
   }
 
+  // ── Tab nav config ────────────────────────────────────────────────────────
+  const tabConfig = [
+    { key: 'WALLET', label: 'Wallet', icon: WalletIcon },
+    { key: 'SEND', label: 'Send', icon: SendIcon },
+    { key: 'TEMPLATES', label: 'Templates', icon: FileText },
+    { key: 'FIELDS', label: 'Fields', icon: Variable },
+    { key: 'CONTACTS', label: 'Upload Contacts', icon: Users },
+    { key: 'CONTACT_BOOK', label: 'Contact Book', icon: BookOpen },
+  ];
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{headerMeta.title}</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">{headerMeta.subtitle}</p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader title={headerMeta.title} subtitle={headerMeta.subtitle} />
 
-      {error && <div className="rounded-lg bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
-      {info && <div className="rounded-lg bg-emerald-50 text-emerald-700 text-sm px-3 py-2">{info}</div>}
+      {/* Feedback */}
+      {error && (
+        <div className="flex items-start gap-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm px-4 py-3">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          {error}
+        </div>
+      )}
+      {info && (
+        <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-sm px-4 py-3">
+          <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+          {info}
+        </div>
+      )}
 
-      <div className={forcedTab ? 'space-y-4' : 'grid lg:grid-cols-[260px_1fr] gap-4 items-start'}>
+      <div className={forcedTab ? 'space-y-5' : 'grid lg:grid-cols-[220px_1fr] gap-5 items-start'}>
+
+        {/* ── Sidebar nav (only when not forcedTab) ──────────────────────── */}
         {!forcedTab && (
-          <aside className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-sm">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 px-2 py-2">Communications</div>
-            <nav className="space-y-1">
-              {tabs.map((tab) => (
+          <aside className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-2 shadow-sm">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-neutral-400 px-3 py-2">
+              Communications
+            </div>
+            <nav className="space-y-0.5">
+              {tabConfig.map(({ key, label, icon: Icon }) => (
                 <button
-                  key={tab}
+                  key={key}
                   type="button"
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => setActiveTab(key)}
                   className={[
-                    'w-full text-left rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
-                    activeTab === tab
+                    'w-full text-left rounded-xl px-3 py-2.5 text-sm font-medium transition-colors flex items-center gap-2.5',
+                    activeTab === key
                       ? 'bg-brand-600 text-white'
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70',
+                      : 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800',
                   ].join(' ')}
                 >
-                  {tab === 'WALLET'
-                    ? 'Wallet'
-                    : tab === 'SEND'
-                      ? 'Send Communication'
-                      : tab === 'TEMPLATES'
-                        ? 'Template Creation & Listing'
-                        : tab === 'FIELDS'
-                          ? 'Personalization fields'
-                          : tab === 'CONTACT_BOOK'
-                            ? 'Contact Book'
-                            : 'Upload Contacts'}
+                  <Icon className="w-4 h-4 shrink-0" />
+                  {label}
                 </button>
               ))}
             </nav>
           </aside>
         )}
 
-        <div className="space-y-4">
+        {/* ── Tab content ────────────────────────────────────────────────── */}
+        <div className="space-y-5 min-w-0">
+
+          {/* ── WALLET ─────────────────────────────────────────────────── */}
           {activeTab === 'WALLET' && (
             <>
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-            <div className="font-semibold">Wallet</div>
-            <div className="text-sm text-slate-600 dark:text-slate-300">
-              Balance: <span className="font-semibold">₹{Number(wallet?.balance || 0).toLocaleString('en-IN')}</span>
-            </div>
-            <div className="text-xs text-slate-500">Charge: ₹{messageCost} per contact per message</div>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={addAmount}
-                onChange={(e) => setAddAmount(e.target.value)}
-                placeholder="Add money amount"
-                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm w-48"
-              />
-              <button
-                type="button"
-                onClick={addMoney}
-                disabled={addingMoney}
-                className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold"
-              >
-                {addingMoney ? 'Starting...' : 'Add money'}
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
-            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3">
-              <div className="font-semibold text-sm">Wallet transactions</div>
-              <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                {['ALL', 'CREDIT', 'DEBIT'].map((f) => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => changeTxnFilter(f)}
-                    className={[
-                      'px-3 py-1.5 text-xs font-semibold',
-                      txnFilter === f
-                        ? 'bg-brand-600 text-white'
-                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
-                    ].join(' ')}
+              {/* Balance card */}
+              <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-widest text-neutral-500 mb-1">Wallet balance</div>
+                    <div className="text-3xl font-bold text-neutral-900 dark:text-neutral-50">
+                      ₹{Number(wallet?.balance || 0).toLocaleString('en-IN')}
+                    </div>
+                    <div className="text-xs text-neutral-500 mt-1">
+                      ₹{messageCost} per contact per message
+                    </div>
+                  </div>
+                  <div className="shrink-0 w-12 h-12 rounded-xl bg-brand-50 dark:bg-brand-950/40 flex items-center justify-center">
+                    <WalletIcon className="w-6 h-6 text-brand-600 dark:text-brand-400" />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 pt-4 border-t border-neutral-100 dark:border-neutral-800">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={addAmount}
+                    onChange={(e) => setAddAmount(e.target.value)}
+                    placeholder="Amount to add (₹)"
+                    className={`${inputCls} w-52`}
+                  />
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={addingMoney}
+                    onClick={addMoney}
+                    disabled={!addAmount}
                   >
-                    {f === 'ALL' ? 'All' : f === 'CREDIT' ? 'Credit' : 'Debit'}
-                  </button>
-                ))}
+                    Add money
+                  </Button>
+                </div>
               </div>
-            </div>
-            <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800">
-              <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={txnOnlyTopups}
-                  onChange={(e) => toggleOnlyTopups(e.target.checked)}
-                />
-                Only Top-ups
-              </label>
-            </div>
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
-                <tr>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3">Amount</th>
-                  <th className="px-4 py-3">Description</th>
-                  <th className="px-4 py-3">When</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {walletTxns.map((t) => (
-                  <tr key={t.id}>
-                    <td className="px-4 py-3">
-                      <span
-                        className={[
-                          'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold',
-                          t.type === 'CREDIT'
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                            : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
-                        ].join(' ')}
-                      >
-                        {t.type}
-                      </span>
-                    </td>
-                    <td
-                      className={[
-                        'px-4 py-3 font-semibold',
-                        t.type === 'CREDIT'
-                          ? 'text-emerald-700 dark:text-emerald-300'
-                          : 'text-rose-700 dark:text-rose-300',
-                      ].join(' ')}
-                    >
-                      {t.type === 'CREDIT' ? '+' : '-'}₹{Number(t.amount).toLocaleString('en-IN')}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{t.description || '—'}</td>
-                    <td className="px-4 py-3 text-slate-500">{new Date(t.createdAt).toLocaleString()}</td>
-                  </tr>
-                ))}
-                {!walletTxns.length && (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
-                      No wallet transactions yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-            <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
-              <div className="text-xs text-slate-500">
-                {txnLoading ? 'Loading transactions...' : `Showing ${walletTxns.length} transaction(s)`}
+
+              {/* Transactions */}
+              <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden shadow-sm">
+                <div className="px-5 py-3.5 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Transactions</span>
+                  <div className="flex items-center gap-3">
+                    <label className="inline-flex items-center gap-2 text-xs font-medium text-neutral-600 dark:text-neutral-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={txnOnlyTopups}
+                        onChange={(e) => toggleOnlyTopups(e.target.checked)}
+                        className="accent-brand-600"
+                      />
+                      Only top-ups
+                    </label>
+                    <div className="inline-flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+                      {['ALL', 'CREDIT', 'DEBIT'].map((f) => (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() => changeTxnFilter(f)}
+                          className={[
+                            'px-3 py-1.5 text-xs font-semibold transition-colors',
+                            txnFilter === f
+                              ? 'bg-brand-600 text-white'
+                              : 'bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800',
+                          ].join(' ')}
+                        >
+                          {f === 'ALL' ? 'All' : f === 'CREDIT' ? 'Credit' : 'Debit'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-neutral-50 dark:bg-neutral-800/60">
+                      <tr>
+                        {['Type', 'Amount', 'Description', 'When'].map((h) => (
+                          <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                      {walletTxns.map((t) => (
+                        <tr key={t.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
+                          <td className="px-4 py-3">
+                            <span className={[
+                              'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold',
+                              t.type === 'CREDIT'
+                                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+                            ].join(' ')}>
+                              {t.type}
+                            </span>
+                          </td>
+                          <td className={[
+                            'px-4 py-3 font-semibold',
+                            t.type === 'CREDIT' ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300',
+                          ].join(' ')}>
+                            {t.type === 'CREDIT' ? '+' : '-'}₹{Number(t.amount).toLocaleString('en-IN')}
+                          </td>
+                          <td className="px-4 py-3 text-neutral-600 dark:text-neutral-300">{t.description || '—'}</td>
+                          <td className="px-4 py-3 text-neutral-500 text-xs">{new Date(t.createdAt).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                      {!walletTxns.length && (
+                        <tr>
+                          <td colSpan={4} className="px-4 py-10 text-center text-sm text-neutral-500">
+                            No wallet transactions yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-4 py-3 border-t border-neutral-100 dark:border-neutral-800 flex justify-between items-center">
+                  <span className="text-xs text-neutral-500">
+                    {txnLoading ? 'Loading…' : `${walletTxns.length} transaction(s)`}
+                  </span>
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    onClick={loadMoreTxns}
+                    disabled={!txnHasMore || txnLoading}
+                    loading={txnLoading}
+                  >
+                    {txnHasMore ? 'Load more' : 'No more'}
+                  </Button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={loadMoreTxns}
-                disabled={!txnHasMore || txnLoading}
-                className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
-              >
-                {txnLoading ? 'Loading...' : txnHasMore ? 'Load more' : 'No more'}
-              </button>
-            </div>
-          </div>
             </>
           )}
 
+          {/* ── SEND ───────────────────────────────────────────────────── */}
+          {activeTab === 'SEND' && (
+            <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide">Template</label>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(e) => setSelectedTemplateId(e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="">Select template</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.status})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-end pb-0.5">
+                  <label className="inline-flex items-center gap-2 text-sm font-medium cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={bulkMode}
+                      onChange={(e) => setBulkMode(e.target.checked)}
+                      className="accent-brand-600 w-4 h-4"
+                    />
+                    <span className="text-neutral-700 dark:text-neutral-300">Bulk send</span>
+                  </label>
+                </div>
+              </div>
+
+              {!bulkMode ? (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide">Contact</label>
+                  <select
+                    value={selectedContactId}
+                    onChange={(e) => setSelectedContactId(e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="">Select contact</option>
+                    {contacts.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name || c.phone} ({c.phone})</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-1.5">Select contacts</label>
+                  <div className="max-h-44 overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-700 p-2 space-y-1">
+                    {contacts.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2.5 text-sm px-2 py-1.5 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-800 cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={!!selectedBulk[c.id]}
+                          onChange={(e) => setSelectedBulk((prev) => ({ ...prev, [c.id]: e.target.checked }))}
+                          className="accent-brand-600 w-4 h-4"
+                        />
+                        <span className="text-neutral-700 dark:text-neutral-300">{c.name || 'Unknown'} ({c.phone})</span>
+                      </label>
+                    ))}
+                    {!contacts.length && <div className="text-sm text-neutral-500 px-2 py-2">No contacts available.</div>}
+                  </div>
+                </div>
+              )}
+
+              <div className="text-xs text-neutral-500 font-medium">
+                Estimated charge: ₹{bulkMode
+                  ? Object.values(selectedBulk).filter(Boolean).length * messageCost
+                  : selectedContactId ? messageCost : 0}
+              </div>
+
+              {selectedTemplate && (
+                <div className="rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700 px-4 py-3 space-y-2">
+                  <div className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">Template source</div>
+                  <div className="font-mono text-xs whitespace-pre-wrap break-words text-neutral-700 dark:text-neutral-300">
+                    {selectedTemplate.content}
+                  </div>
+                  {!bulkMode && sendPreview ? (
+                    <>
+                      <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 pt-1 uppercase tracking-wide">
+                        Resolved preview
+                      </div>
+                      <div className="text-sm whitespace-pre-wrap break-words text-neutral-800 dark:text-neutral-200">
+                        {sendPreview}
+                      </div>
+                    </>
+                  ) : null}
+                  {bulkMode && (
+                    <p className="text-xs text-neutral-500">Open a single contact to see a resolved preview.</p>
+                  )}
+                </div>
+              )}
+
+              <Button
+                variant="primary"
+                loading={sending}
+                onClick={sendTemplate}
+                iconLeft={<SendIcon className="w-4 h-4" />}
+              >
+                {sending ? 'Sending…' : 'Send communication'}
+              </Button>
+            </div>
+          )}
+
+          {/* ── FIELDS ─────────────────────────────────────────────────── */}
           {activeTab === 'FIELDS' && (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-                <div className="font-semibold">Built-in &amp; computed fields</div>
-                <p className="text-xs text-slate-500">
+            <div className="space-y-5">
+              {/* Built-ins */}
+              <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm space-y-4">
+                <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Built-in &amp; computed fields</div>
+                <p className="text-xs text-neutral-500">
                   Business display values are edited per client under{' '}
-                  <strong>Settings → Client profile — templates &amp; campaigns</strong>. Appointment and payment
-                  values resolve per customer when you send to a <strong>customer</strong> (not a bare contact row).
-                  Use dotted names (e.g. <code className="font-mono">customer.name</code>) or legacy snake_case (
-                  <code className="font-mono">customer_name</code>) — both work.
+                  <strong>Settings → Client profile</strong>. Use dotted names (e.g.{' '}
+                  <code className="font-mono bg-neutral-100 dark:bg-neutral-800 px-1 rounded">customer.name</code>) or legacy
+                  snake_case — both work.
                 </p>
                 <div className="space-y-4">
                   {BUILTIN_CATEGORY_ORDER.filter((c) => (builtinsByCategory[c] || []).length).map((cat) => (
                     <div key={cat}>
-                      <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">{cat}</div>
-                      <ul className="text-sm grid sm:grid-cols-2 gap-2">
+                      <div className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2">{cat}</div>
+                      <ul className="grid sm:grid-cols-2 gap-2">
                         {(builtinsByCategory[cat] || []).map((b) => (
-                          <li key={b.key} className="rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2">
-                            <div className="font-mono text-brand-700 text-xs">{b.namespace || b.key}</div>
-                            <div className="text-slate-500 text-xs mt-0.5">{b.label}</div>
+                          <li key={b.key} className="rounded-xl border border-neutral-100 dark:border-neutral-800 px-3 py-2">
+                            <div className="font-mono text-xs text-brand-700 dark:text-brand-300">{b.namespace || b.key}</div>
+                            <div className="text-neutral-500 text-xs mt-0.5">{b.label}</div>
                           </li>
                         ))}
                       </ul>
@@ -1255,420 +1036,316 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-                <div className="font-semibold">Custom fields</div>
+              {/* Custom fields */}
+              <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm space-y-4">
+                <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Custom fields</div>
                 <div className="grid md:grid-cols-2 gap-3">
-                  <input
-                    value={newFieldKey}
-                    onChange={(e) => setNewFieldKey(e.target.value)}
-                    placeholder="Key (e.g. offer_code)"
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  />
-                  <input
-                    value={newFieldLabel}
-                    onChange={(e) => setNewFieldLabel(e.target.value)}
-                    placeholder="Label shown in UI"
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  />
-                  <select
-                    value={newFieldType}
-                    onChange={(e) => setNewFieldType(e.target.value)}
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  >
+                  <input value={newFieldKey} onChange={(e) => setNewFieldKey(e.target.value)} placeholder="Key (e.g. offer_code)" className={inputCls} />
+                  <input value={newFieldLabel} onChange={(e) => setNewFieldLabel(e.target.value)} placeholder="Label shown in UI" className={inputCls} />
+                  <select value={newFieldType} onChange={(e) => setNewFieldType(e.target.value)} className={inputCls}>
                     <option value="BUSINESS">Business — same value for every customer</option>
                     <option value="CUSTOMER">Customer — different per contact / customer</option>
                   </select>
-                  <input
-                    value={newFieldDefault}
-                    onChange={(e) => setNewFieldDefault(e.target.value)}
-                    placeholder="Default value"
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  />
+                  <input value={newFieldDefault} onChange={(e) => setNewFieldDefault(e.target.value)} placeholder="Default value" className={inputCls} />
                 </div>
-                <button
-                  type="button"
-                  disabled={fieldsSaving}
-                  onClick={createFieldDefinition}
-                  className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold"
+                <Button variant="primary" size="sm" loading={fieldsSaving} onClick={createFieldDefinition} iconLeft={<Plus className="w-3.5 h-3.5" />}>
+                  Create field
+                </Button>
+                <div className="overflow-x-auto rounded-xl border border-neutral-100 dark:border-neutral-800">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-neutral-50 dark:bg-neutral-800/60">
+                      <tr>
+                        {['Key', 'Label', 'Type', 'Default', ''].map((h) => (
+                          <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                      {fieldDefs.map((d) => (
+                        <tr key={d.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
+                          <td className="px-3 py-2.5 font-mono text-xs text-brand-700 dark:text-brand-300">{d.key}</td>
+                          <td className="px-3 py-2.5 text-neutral-700 dark:text-neutral-300">{d.label}</td>
+                          <td className="px-3 py-2.5 text-neutral-500">{d.type}</td>
+                          <td className="px-3 py-2.5 max-w-xs truncate text-neutral-500">{d.defaultValue}</td>
+                          <td className="px-3 py-2.5">
+                            <button type="button" className="text-xs font-semibold text-red-600 hover:text-red-700 transition-colors" onClick={() => deleteFieldDefinition(d.id)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {!fieldDefs.length && (
+                        <tr><td colSpan={5} className="px-3 py-8 text-center text-sm text-neutral-500">No custom fields yet.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Bulk CSV import */}
+              <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm space-y-3">
+                <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Bulk update customer fields (CSV)</div>
+                <p className="text-xs text-neutral-500">
+                  First row headers. Include a phone column (E.164). List CUSTOMER field keys as columns.
+                </p>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <input value={fieldsPhoneCol} onChange={(e) => setFieldsPhoneCol(e.target.value)} placeholder="Phone column (default: phone)" className={inputCls} />
+                  <input value={fieldsVarCols} onChange={(e) => setFieldsVarCols(e.target.value)} placeholder="Variable columns: loyalty_points, preferred_service" className={inputCls} />
+                </div>
+                <textarea
+                  rows={6}
+                  value={fieldsCsvPaste}
+                  onChange={(e) => setFieldsCsvPaste(e.target.value)}
+                  className={`${inputCls} font-mono resize-y`}
+                  placeholder={'phone,loyalty_points\n+919876543210,120'}
+                />
+                <Button variant="secondary" size="sm" loading={fieldsSaving} onClick={importFieldCsv}>
+                  {fieldsSaving ? 'Importing…' : 'Import CSV'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* ── CONTACTS ───────────────────────────────────────────────── */}
+          {activeTab === 'CONTACTS' && (
+            <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm space-y-4">
+              <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Upload contacts</div>
+              <p className="text-xs text-neutral-500">
+                Paste CSV lines as: <code className="font-mono bg-neutral-100 dark:bg-neutral-800 px-1 rounded">name,phone</code>{' '}
+                (one line per contact)
+              </p>
+              <textarea
+                rows={10}
+                value={csvText}
+                onChange={(e) => setCsvText(e.target.value)}
+                className={`${inputCls} font-mono resize-y`}
+                placeholder={'Ravi,+919876543210\nSana,+918123456789'}
+              />
+              <Button
+                variant="primary"
+                loading={uploadingContactsLoading}
+                onClick={uploadContacts}
+                iconLeft={<Users className="w-4 h-4" />}
+              >
+                {uploadingContactsLoading ? 'Uploading…' : 'Upload contacts'}
+              </Button>
+            </div>
+          )}
+
+          {/* ── CONTACT BOOK ───────────────────────────────────────────── */}
+          {activeTab === 'CONTACT_BOOK' && (
+            <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden shadow-sm">
+              <div className="px-5 py-3.5 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Contact Book</span>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  loading={contactBookLoading}
+                  onClick={loadContactBook}
+                  iconLeft={<RefreshCw className="w-3.5 h-3.5" />}
                 >
-                  {fieldsSaving ? 'Saving…' : 'Create field'}
-                </button>
-                <table className="min-w-full text-sm mt-4">
-                  <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
+                  Refresh
+                </Button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-neutral-50 dark:bg-neutral-800/60">
                     <tr>
-                      <th className="px-3 py-2">Key</th>
-                      <th className="px-3 py-2">Label</th>
-                      <th className="px-3 py-2">Type</th>
-                      <th className="px-3 py-2">Default</th>
-                      <th className="px-3 py-2" />
+                      {['Name', 'Phone', 'Paid', 'Bookings', 'Products', ''].map((h) => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                      ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {fieldDefs.map((d) => (
-                      <tr key={d.id}>
-                        <td className="px-3 py-2 font-mono">{d.key}</td>
-                        <td className="px-3 py-2">{d.label}</td>
-                        <td className="px-3 py-2">{d.type}</td>
-                        <td className="px-3 py-2 max-w-xs truncate">{d.defaultValue}</td>
-                        <td className="px-3 py-2">
-                          <button
-                            type="button"
-                            className="text-rose-700 text-xs font-semibold"
-                            onClick={() => deleteFieldDefinition(d.id)}
-                          >
+                  <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                    {contactBookRows.map((r) => (
+                      <tr key={r.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
+                        <td className="px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">{r.name || '—'}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-neutral-500">{r.phone}</td>
+                        <td className="px-4 py-3 text-neutral-700 dark:text-neutral-300">₹{Number(r.amountPaid || 0).toFixed(2)}</td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-neutral-900 dark:text-neutral-100">{r.bookingCount || 0}</div>
+                          {Array.isArray(r.bookingIds) && r.bookingIds.length ? (
+                            <div className="text-[11px] text-neutral-400 truncate max-w-[200px]">
+                              {r.bookingIds.slice(0, 5).join(', ')}{r.bookingIds.length > 5 ? ` +${r.bookingIds.length - 5} more` : ''}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3">
+                          {Array.isArray(r.productsBought) && r.productsBought.length ? (
+                            <div>
+                              <div className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">{r.productsBought.length} item(s)</div>
+                              <div className="text-[11px] text-neutral-400 truncate max-w-[200px]">
+                                {r.productsBought.slice(0, 4).map((p) => `${p.name}${p.count > 1 ? ` (${p.count})` : ''}`).join(', ')}
+                                {r.productsBought.length > 4 ? ` +${r.productsBought.length - 4} more` : ''}
+                              </div>
+                            </div>
+                          ) : <span className="text-xs text-neutral-400">—</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button type="button" onClick={() => deleteContact(r.id)} className="text-xs font-semibold text-red-600 hover:text-red-700 transition-colors">
                             Delete
                           </button>
                         </td>
                       </tr>
                     ))}
-                    {!fieldDefs.length && (
+                    {!contactBookRows.length && !contactBookLoading && (
+                      <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-neutral-500">No contacts found.</td></tr>
+                    )}
+                    {contactBookLoading && !contactBookRows.length && (
                       <tr>
-                        <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
-                          No custom fields yet.
+                        <td colSpan={6} className="px-4 py-10 text-center">
+                          <Loader2 className="w-5 h-5 text-neutral-400 animate-spin mx-auto" />
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-                <div className="font-semibold">Bulk update customer fields (CSV)</div>
-                <p className="text-xs text-slate-500">
-                  First row headers. Include a phone column (E.164). List CUSTOMER field keys as columns to import
-                  (must match keys you created above).
-                </p>
-                <div className="grid md:grid-cols-2 gap-3">
-                  <input
-                    value={fieldsPhoneCol}
-                    onChange={(e) => setFieldsPhoneCol(e.target.value)}
-                    placeholder="Phone column name (default: phone)"
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  />
-                  <input
-                    value={fieldsVarCols}
-                    onChange={(e) => setFieldsVarCols(e.target.value)}
-                    placeholder="Variable columns: loyalty_points, preferred_service"
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  />
-                </div>
-                <textarea
-                  rows={6}
-                  value={fieldsCsvPaste}
-                  onChange={(e) => setFieldsCsvPaste(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-mono"
-                  placeholder={'phone,loyalty_points\n+919876543210,120'}
-                />
-                <button
-                  type="button"
-                  disabled={fieldsSaving}
-                  onClick={importFieldCsv}
-                  className="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 py-2 text-sm font-semibold"
-                >
-                  {fieldsSaving ? 'Importing…' : 'Import CSV'}
-                </button>
-              </div>
             </div>
           )}
 
-          {activeTab === 'CONTACTS' && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-              <div className="font-semibold">Upload contacts</div>
-              <p className="text-xs text-slate-500">Paste CSV lines as: name,phone (one line per contact)</p>
-              <textarea
-                rows={10}
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-mono"
-                placeholder={'Ravi,+919876543210\nSana,+918123456789'}
-              />
-              <button
-                type="button"
-                onClick={uploadContacts}
-                disabled={uploadingContactsLoading}
-                className="rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-4 py-2 text-sm font-semibold"
-              >
-                {uploadingContactsLoading ? 'Uploading...' : 'Upload'}
-              </button>
-            </div>
-          )}
-
-          {activeTab === 'CONTACT_BOOK' && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
-              <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm flex items-center justify-between gap-3">
-                <span>Contact Book</span>
-                <button
-                  type="button"
-                  onClick={loadContactBook}
-                  disabled={contactBookLoading}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
-                >
-                  {contactBookLoading ? 'Refreshing...' : 'Refresh'}
-                </button>
-              </div>
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
-                  <tr>
-                    <th className="px-4 py-3">Name</th>
-                    <th className="px-4 py-3">Phone</th>
-                    <th className="px-4 py-3">Amount paid</th>
-                    <th className="px-4 py-3">Booking No</th>
-                    <th className="px-4 py-3">Products bought</th>
-                    <th className="px-4 py-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {contactBookRows.map((r) => (
-                    <tr key={r.id}>
-                      <td className="px-4 py-3">{r.name || '-'}</td>
-                      <td className="px-4 py-3 font-mono text-xs">{r.phone}</td>
-                      <td className="px-4 py-3">₹{Number(r.amountPaid || 0).toFixed(2)}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold">{r.bookingCount || 0}</div>
-                        {Array.isArray(r.bookingIds) && r.bookingIds.length ? (
-                          <div className="text-[11px] text-slate-500 truncate max-w-[320px]">
-                            {r.bookingIds.slice(0, 5).join(', ')}
-                            {r.bookingIds.length > 5 ? ` +${r.bookingIds.length - 5} more` : ''}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-3">
-                        {Array.isArray(r.productsBought) && r.productsBought.length ? (
-                          <div className="space-y-1 max-w-[360px]">
-                            <div className="text-xs font-semibold">{r.productsBought.length} item(s)</div>
-                            <div className="text-[11px] text-slate-500 truncate">
-                              {r.productsBought
-                                .slice(0, 4)
-                                .map((p) => `${p.name}${p.count > 1 ? ` (${p.count})` : ''}`)
-                                .join(', ')}
-                              {r.productsBought.length > 4 ? ` +${r.productsBought.length - 4} more` : ''}
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => deleteContact(r.id)}
-                          className="text-xs font-semibold text-rose-700"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {!contactBookRows.length && !contactBookLoading && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                        No contacts found.
-                      </td>
-                    </tr>
-                  )}
-                  {contactBookLoading && !contactBookRows.length && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                        Loading contact book...
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
+          {/* ── TEMPLATES ──────────────────────────────────────────────── */}
           {activeTab === 'TEMPLATES' && (
             <>
-          {(templateMode === 'combined' || templateMode === 'create' || templateMode === 'edit') && (
-          <div className="relative rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-            {editingTemplateLoading && templateMode === 'edit' && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/80 dark:bg-slate-900/80 text-sm font-medium text-slate-600">
-                Loading template…
-              </div>
-            )}
-            <div className="font-semibold">{templateMode === 'edit' ? 'Edit template' : 'Create template'}</div>
-            <input
-              value={templateName}
-              onChange={(e) => setTemplateName(e.target.value)}
-              placeholder="Template name"
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-500">Insert variable</span>
-              <select
-                aria-label="Insert template variable"
-                className="max-w-[min(100%,280px)] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-xs"
-                defaultValue=""
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v) insertTemplateToken(v);
-                  e.target.value = '';
-                }}
-              >
-                <option value="">Choose…</option>
-                {BUILTIN_CATEGORY_ORDER.map((cat) => (
-                  <optgroup key={cat} label={cat}>
-                    {(builtinsByCategory[cat] || []).map((b) => (
-                      <option key={b.key} value={b.key}>
-                        {b.namespace ? `${b.namespace} → ${b.key}` : b.key} — {b.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-                {fieldDefs.length ? (
-                  <optgroup label="Custom fields">
-                    {fieldDefs.map((d) => (
-                      <option key={d.id} value={d.key}>
-                        {d.key}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-              </select>
-            </div>
-            <textarea
-              ref={templateBodyRef}
-              rows={6}
-              value={templateContent}
-              onChange={(e) => setTemplateContent(e.target.value)}
-              placeholder="Hi {{customer_name}}, this is a reminder from {{business_name}}."
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-            />
-            <div className="text-[11px] text-slate-500">
-              Body length: {templateContent.trim().length}/{META_LIMITS.BODY_MAX}
-            </div>
-            <div className="grid md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Category</label>
-                <select
-                  value={templateCategory}
-                  onChange={(e) => setTemplateCategory(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                >
-                  {(metaTemplateOptions.categories || []).map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Language</label>
-                <select
-                  value={templateLanguage}
-                  onChange={(e) => setTemplateLanguage(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                >
-                  {(metaTemplateOptions.languages || []).map((l) => (
-                    <option key={l} value={l}>
-                      {l}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-3">
-              <div className="space-y-3">
-                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
-                    <label className="inline-flex items-center gap-2 text-xs font-medium">
-                      <input
-                        type="checkbox"
-                        checked={includeHeader}
-                        onChange={(e) => setIncludeHeader(e.target.checked)}
-                      />
+              {/* Template builder */}
+              {(templateMode === 'combined' || templateMode === 'create' || templateMode === 'edit') && (
+                <div className="relative rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm space-y-4">
+                  {editingTemplateLoading && templateMode === 'edit' && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/80 dark:bg-neutral-900/80">
+                      <Loader2 className="w-6 h-6 text-neutral-400 animate-spin" />
+                    </div>
+                  )}
+                  <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                    {templateMode === 'edit' ? 'Edit template' : 'Create template'}
+                  </div>
+
+                  <input
+                    value={templateName}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                    placeholder="Template name"
+                    className={inputCls}
+                  />
+
+                  {/* Variable picker */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-neutral-500">Insert variable:</span>
+                    <select
+                      aria-label="Insert template variable"
+                      className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-950 px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      defaultValue=""
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v) insertTemplateToken(v);
+                        e.target.value = '';
+                      }}
+                    >
+                      <option value="">Choose…</option>
+                      {BUILTIN_CATEGORY_ORDER.map((cat) => (
+                        <optgroup key={cat} label={cat}>
+                          {(builtinsByCategory[cat] || []).map((b) => (
+                            <option key={b.key} value={b.key}>
+                              {b.namespace ? `${b.namespace} → ${b.key}` : b.key} — {b.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                      {fieldDefs.length ? (
+                        <optgroup label="Custom fields">
+                          {fieldDefs.map((d) => <option key={d.id} value={d.key}>{d.key}</option>)}
+                        </optgroup>
+                      ) : null}
+                    </select>
+                  </div>
+
+                  <div>
+                    <textarea
+                      ref={templateBodyRef}
+                      rows={6}
+                      value={templateContent}
+                      onChange={(e) => setTemplateContent(e.target.value)}
+                      placeholder="Hi {{customer_name}}, this is a reminder from {{business_name}}."
+                      className={`${inputCls} font-mono resize-y`}
+                    />
+                    <div className="text-[11px] text-neutral-400 mt-1 text-right">
+                      {templateContent.trim().length}/{META_LIMITS.BODY_MAX}
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-1">Category</label>
+                      <select value={templateCategory} onChange={(e) => setTemplateCategory(e.target.value)} className={inputCls}>
+                        {(metaTemplateOptions.categories || []).map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-1">Language</label>
+                      <select value={templateLanguage} onChange={(e) => setTemplateLanguage(e.target.value)} className={inputCls}>
+                        {(metaTemplateOptions.languages || []).map((l) => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Header section */}
+                  <div className="rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 space-y-3">
+                    <label className="inline-flex items-center gap-2 text-sm font-medium cursor-pointer text-neutral-700 dark:text-neutral-300">
+                      <input type="checkbox" checked={includeHeader} onChange={(e) => setIncludeHeader(e.target.checked)} className="accent-brand-600 w-4 h-4" />
                       Include Header
                     </label>
                     {includeHeader && (
-                      <div className="grid md:grid-cols-2 gap-2">
-                        <select
-                          value={headerFormat}
-                          onChange={(e) => setHeaderFormat(e.target.value)}
-                          className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                        >
-                          {['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION'].map((f) => (
-                            <option key={f} value={f}>
-                              {f}
-                            </option>
-                          ))}
+                      <div className="grid md:grid-cols-2 gap-3">
+                        <select value={headerFormat} onChange={(e) => setHeaderFormat(e.target.value)} className={inputCls}>
+                          {['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION'].map((f) => <option key={f} value={f}>{f}</option>)}
                         </select>
                         {headerFormat === 'TEXT' && (
-                          <div className="space-y-1">
-                            <input
-                              value={headerText}
-                              onChange={(e) => setHeaderText(e.target.value)}
-                              placeholder="Header text"
-                              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                            />
-                            <div className="text-[11px] text-slate-500">
-                              Header length: {headerText.trim().length}/{META_LIMITS.HEADER_TEXT_MAX}
-                            </div>
+                          <div>
+                            <input value={headerText} onChange={(e) => setHeaderText(e.target.value)} placeholder="Header text" className={inputCls} />
+                            <div className="text-[11px] text-neutral-400 mt-1">{headerText.trim().length}/{META_LIMITS.HEADER_TEXT_MAX}</div>
                           </div>
                         )}
                         {headerFormat !== 'TEXT' && (
                           <div className="space-y-2">
-                            <input
-                              type="file"
-                              onChange={(e) => uploadHeaderMedia(e.target.files?.[0])}
-                              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                            />
-                            {headerMediaUploading && <div className="text-[11px] text-slate-500">Uploading media...</div>}
-                            {!!headerMediaUrl && (
-                              <div className="text-[11px] text-emerald-700 break-all">
-                                Uploaded URL: {headerMediaUrl}
-                              </div>
-                            )}
+                            <input type="file" onChange={(e) => uploadHeaderMedia(e.target.files?.[0])} className="text-sm text-neutral-600 dark:text-neutral-400 file:mr-3 file:rounded-lg file:border file:border-neutral-200 dark:file:border-neutral-700 file:bg-white dark:file:bg-neutral-900 file:px-3 file:py-1.5 file:text-xs file:font-semibold" />
+                            {headerMediaUploading && <div className="text-[11px] text-neutral-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Uploading…</div>}
+                            {!!headerMediaUrl && <div className="text-[11px] text-emerald-700 dark:text-emerald-400 break-all">Uploaded: {headerMediaUrl}</div>}
                           </div>
                         )}
                       </div>
                     )}
                   </div>
 
-                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
-                    <label className="inline-flex items-center gap-2 text-xs font-medium">
-                      <input
-                        type="checkbox"
-                        checked={includeFooter}
-                        onChange={(e) => setIncludeFooter(e.target.checked)}
-                      />
+                  {/* Footer section */}
+                  <div className="rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 space-y-3">
+                    <label className="inline-flex items-center gap-2 text-sm font-medium cursor-pointer text-neutral-700 dark:text-neutral-300">
+                      <input type="checkbox" checked={includeFooter} onChange={(e) => setIncludeFooter(e.target.checked)} className="accent-brand-600 w-4 h-4" />
                       Include Footer
                     </label>
                     {includeFooter && (
-                      <div className="space-y-1">
-                        <input
-                          value={footerText}
-                          onChange={(e) => setFooterText(e.target.value)}
-                          placeholder="Footer text"
-                          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                        />
-                        <div className="text-[11px] text-slate-500">
-                          Footer length: {footerText.trim().length}/{META_LIMITS.FOOTER_TEXT_MAX}
-                        </div>
+                      <div>
+                        <input value={footerText} onChange={(e) => setFooterText(e.target.value)} placeholder="Footer text" className={inputCls} />
+                        <div className="text-[11px] text-neutral-400 mt-1">{footerText.trim().length}/{META_LIMITS.FOOTER_TEXT_MAX}</div>
                       </div>
                     )}
                   </div>
 
-                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+                  {/* Buttons section */}
+                  <div className="rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 space-y-3">
                     <div className="flex items-center justify-between">
-                      <div className="text-xs font-medium">Buttons</div>
+                      <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Buttons</span>
                       <button
                         type="button"
-                        onClick={() =>
-                          setButtons((prev) => [...prev, { id: crypto.randomUUID(), type: 'QUICK_REPLY', text: '', url: '', phoneNumber: '' }])
-                        }
-                        className="text-xs font-semibold text-brand-700"
+                        onClick={() => setButtons((prev) => [...prev, { id: crypto.randomUUID(), type: 'QUICK_REPLY', text: '', url: '', phoneNumber: '' }])}
+                        className="text-xs font-semibold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1 transition-colors"
                       >
-                        + Add button
+                        <Plus className="w-3.5 h-3.5" /> Add button
                       </button>
                     </div>
                     {buttons.map((b) => (
-                      <div key={b.id} className="grid md:grid-cols-4 gap-2">
+                      <div key={b.id} className="grid md:grid-cols-4 gap-2 items-start">
                         <select
                           value={b.type}
-                          onChange={(e) =>
-                            setButtons((prev) => prev.map((x) => (x.id === b.id ? { ...x, type: e.target.value } : x)))
-                          }
-                          className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                          onChange={(e) => setButtons((prev) => prev.map((x) => (x.id === b.id ? { ...x, type: e.target.value } : x)))}
+                          className={inputCls}
                         >
                           <option value="QUICK_REPLY">QUICK_REPLY</option>
                           <option value="URL">URL</option>
@@ -1676,401 +1353,228 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
                         </select>
                         <input
                           value={b.text}
-                          onChange={(e) =>
-                            setButtons((prev) => prev.map((x) => (x.id === b.id ? { ...x, text: e.target.value } : x)))
-                          }
+                          onChange={(e) => setButtons((prev) => prev.map((x) => (x.id === b.id ? { ...x, text: e.target.value } : x)))}
                           placeholder="Button text"
-                          className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                          className={inputCls}
                         />
                         {b.type === 'URL' && (
                           <input
                             value={b.url}
-                            onChange={(e) =>
-                              setButtons((prev) => prev.map((x) => (x.id === b.id ? { ...x, url: e.target.value } : x)))
-                            }
+                            onChange={(e) => setButtons((prev) => prev.map((x) => (x.id === b.id ? { ...x, url: e.target.value } : x)))}
                             placeholder="https://example.com"
-                            className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                            className={inputCls}
                           />
                         )}
                         {b.type === 'PHONE_NUMBER' && (
                           <input
                             value={b.phoneNumber}
-                            onChange={(e) =>
-                              setButtons((prev) => prev.map((x) => (x.id === b.id ? { ...x, phoneNumber: e.target.value } : x)))
-                            }
+                            onChange={(e) => setButtons((prev) => prev.map((x) => (x.id === b.id ? { ...x, phoneNumber: e.target.value } : x)))}
                             placeholder="+919999999999"
-                            className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                            className={inputCls}
                           />
                         )}
                         <button
                           type="button"
                           onClick={() => setButtons((prev) => prev.filter((x) => x.id !== b.id))}
-                          className="text-xs text-rose-700 font-semibold"
+                          className="text-xs text-red-600 font-semibold hover:text-red-700 transition-colors flex items-center gap-1"
                         >
-                          Remove
+                          <Trash2 className="w-3.5 h-3.5" /> Remove
                         </button>
                       </div>
                     ))}
-                    <div className="text-[11px] text-slate-500">
-                      Buttons: {buttons.length}/{META_LIMITS.TOTAL_BUTTONS_MAX} | URL: {buttons.filter((b) => b.type === 'URL').length}/{META_LIMITS.URL_BUTTONS_MAX} | Phone: {buttons.filter((b) => b.type === 'PHONE_NUMBER').length}/{META_LIMITS.PHONE_BUTTONS_MAX}
+                    <div className="text-[11px] text-neutral-400">
+                      Buttons: {buttons.length}/{META_LIMITS.TOTAL_BUTTONS_MAX} · URL: {buttons.filter((b) => b.type === 'URL').length}/{META_LIMITS.URL_BUTTONS_MAX} · Phone: {buttons.filter((b) => b.type === 'PHONE_NUMBER').length}/{META_LIMITS.PHONE_BUTTONS_MAX}
                     </div>
                   </div>
-              </div>
-            </div>
-            {!!templateValidationErrors.length && (
-              <div className="rounded-lg bg-red-50 text-red-700 text-xs px-3 py-2 space-y-1">
-                {templateValidationErrors.map((msg) => (
-                  <div key={msg}>- {msg}</div>
-                ))}
-              </div>
-            )}
-            {templateMode === 'edit' ? (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => saveEditTemplate(false)}
-                  disabled={savingEditTemplate || editingTemplateLoading}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-semibold disabled:opacity-50"
-                >
-                  {savingEditTemplate ? 'Saving…' : 'Save draft (local)'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => saveEditTemplate(true)}
-                  disabled={savingEditTemplate || editingTemplateLoading}
-                  className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
-                >
-                  {savingEditTemplate ? 'Saving…' : 'Save & publish to Meta'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate('/communications/templates')}
-                  disabled={savingEditTemplate}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-semibold"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <>
-            <button
-              type="button"
-              onClick={createTemplate}
-              disabled={creatingTemplate}
-              className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold"
-            >
-              {creatingTemplate ? 'Creating...' : 'Create template'}
-            </button>
-            {templateMode === 'create' && (
-              <button
-                type="button"
-                onClick={() => navigate('/communications/templates')}
-                className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-semibold ml-2"
-              >
-                Back to templates
-              </button>
-            )}
-              </>
-            )}
-          </div>
-          )}
 
-          {cloneSource && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-              <div className="max-w-md w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-5 space-y-4">
-                <div className="font-semibold text-sm">Clone template</div>
-                <p className="text-xs text-slate-500">
-                  From: <span className="font-medium text-slate-700 dark:text-slate-200">{cloneSource.name}</span>
-                </p>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">New template name</label>
-                  <input
-                    value={cloneNewName}
-                    onChange={(e) => setCloneNewName(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  />
-                </div>
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={cloneOnMeta} onChange={(e) => setCloneOnMeta(e.target.checked)} />
-                  Also create on Meta (WhatsApp)
-                </label>
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm"
-                    onClick={() => setCloneSource(null)}
-                    disabled={cloneSubmitting}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={cloneSubmitting}
-                    className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
-                    onClick={() => submitClone()}
-                  >
-                    {cloneSubmitting ? 'Cloning…' : 'Clone'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {(templateMode === 'combined' || templateMode === 'list') && (
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
-            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm flex items-center justify-between gap-3">
-              <span>Templates</span>
-              <button
-                type="button"
-                onClick={() => navigate('/communications/templates/create')}
-                className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-xs font-semibold"
-              >
-                Create Template
-              </button>
-            </div>
-            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 text-xs text-slate-500">
-              Use friendly keys in the body (e.g. <code className="font-mono">{'{{customer_name}}'}</code>,{' '}
-              <code className="font-mono">{'{{offer_code}}'}</code>). For Meta-style numbered variables, use &quot;Map
-              fields&quot; on each template.
-            </div>
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-800/80 text-left">
-                <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Content</th>
-                  <th className="px-4 py-3">Meta Status</th>
-                  <th className="px-4 py-3">Local Status</th>
-                  <th className="px-4 py-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {templates.map((t) => (
-                  <tr key={t.id}>
-                    <td className="px-4 py-3">{t.name}</td>
-                    <td className="px-4 py-3 text-slate-600 max-w-md truncate">{t.content}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={[
-                          'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold',
-                          metaStatusBadgeClass(t.metaStatus || 'NOT_FOUND'),
-                        ].join(' ')}
-                      >
-                        {displayMetaStatus(t.metaStatus)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">{t.status}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-x-2 gap-y-1">
-                      <button
-                        type="button"
-                        className="text-xs font-semibold text-brand-700"
-                        onClick={() => navigate(`/communications/templates/${t.id}/edit`)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs font-semibold text-slate-700 dark:text-slate-200"
-                        onClick={() => {
-                          setCloneSource({ id: t.id, name: t.name });
-                          setCloneNewName(`Copy of ${t.name}`);
-                          setCloneOnMeta(false);
-                        }}
-                      >
-                        Clone
-                      </button>
-                      <button
-                        type="button"
-                        disabled={syncingTemplateId === t.id}
-                        className="text-xs font-semibold text-brand-700"
-                        onClick={() => updateTemplateStatus(t.id)}
-                      >
-                        {syncingTemplateId === t.id ? 'Syncing...' : 'Sync from Meta'}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs font-semibold text-slate-700 dark:text-slate-200"
-                        onClick={() => openMappingModal(t.id)}
-                      >
-                        Map {'{{n}}'}
-                      </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {!templates.length && (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                      No templates yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-            {mappingModalId && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-                <div className="max-w-lg w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-5 space-y-4">
-                  <div className="font-semibold text-sm">Map numbered placeholders</div>
-                  {mappingLoading && !mappingRows.length ? (
-                    <div className="text-sm text-slate-500">Loading…</div>
-                  ) : !mappingRows.length ? (
-                    <p className="text-sm text-slate-600 dark:text-slate-300">
-                      This template has no <code className="font-mono">{'{{1}}'}</code>-style placeholders. Use named
-                      keys in the template body instead.
-                    </p>
-                  ) : (
-                    <div className="space-y-2 max-h-72 overflow-y-auto">
-                      {mappingRows.map((row, idx) => (
-                        <div key={row.placeholderIndex} className="grid grid-cols-[1fr_2fr] gap-2 items-center">
-                          <span className="text-xs font-mono text-slate-600">
-                            {'{{'}
-                            {row.placeholderIndex}
-                            {'}}'}
-                          </span>
-                          <select
-                            value={row.variableKey}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setMappingRows((prev) =>
-                                prev.map((r, i) => (i === idx ? { ...r, variableKey: v } : r)),
-                              );
-                            }}
-                            className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-sm"
-                          >
-                            <option value="">— Select field —</option>
-                            {selectableVariableKeys.map((k) => (
-                              <option key={k} value={k}>
-                                {k}
-                              </option>
-                            ))}
-                          </select>
+                  {/* Validation errors */}
+                  {templateValidationErrors.length > 0 && (
+                    <div className="rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-4 py-3 space-y-1">
+                      {templateValidationErrors.map((msg) => (
+                        <div key={msg} className="text-xs text-red-700 dark:text-red-300 flex items-start gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                          {msg}
                         </div>
                       ))}
                     </div>
                   )}
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm"
-                      onClick={() => setMappingModalId('')}
+
+                  {/* Action buttons */}
+                  {templateMode === 'edit' ? (
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      <Button variant="secondary" size="sm" loading={savingEditTemplate} disabled={editingTemplateLoading} onClick={() => saveEditTemplate(false)}>
+                        Save draft (local)
+                      </Button>
+                      <Button variant="primary" size="sm" loading={savingEditTemplate} disabled={editingTemplateLoading} onClick={() => saveEditTemplate(true)}>
+                        Save &amp; publish to Meta
+                      </Button>
+                      <Button variant="ghost" size="sm" disabled={savingEditTemplate} onClick={() => navigate('/communications/templates')}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      <Button variant="primary" size="sm" loading={creatingTemplate} onClick={createTemplate}>
+                        {creatingTemplate ? 'Creating…' : 'Create template'}
+                      </Button>
+                      {templateMode === 'create' && (
+                        <Button variant="ghost" size="sm" onClick={() => navigate('/communications/templates')}>
+                          Back to templates
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Templates list */}
+              {(templateMode === 'combined' || templateMode === 'list') && (
+                <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden shadow-sm">
+                  <div className="px-5 py-3.5 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between gap-3">
+                    <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Templates</span>
+                    <Button
+                      variant="primary"
+                      size="xs"
+                      onClick={() => navigate('/communications/templates/create')}
+                      iconLeft={<Plus className="w-3.5 h-3.5" />}
                     >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      disabled={mappingLoading || !mappingRows.length}
-                      className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
-                      onClick={() => saveTemplateMappings()}
-                    >
-                      Save mapping
-                    </button>
+                      Create
+                    </Button>
+                  </div>
+                  <div className="px-5 py-2.5 border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/30">
+                    <p className="text-xs text-neutral-500">
+                      Use friendly keys in the body (e.g.{' '}
+                      <code className="font-mono bg-white dark:bg-neutral-900 px-1 rounded border border-neutral-200 dark:border-neutral-700">{`{{customer_name}}`}</code>). Use &ldquo;Map{' '}
+                      <code className="font-mono">{`{{n}}`}</code>&rdquo; to wire numbered Meta placeholders.
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-neutral-50 dark:bg-neutral-800/60">
+                        <tr>
+                          {['Name', 'Content', 'Meta status', 'Local status', 'Actions'].map((h) => (
+                            <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                        {templates.map((t) => (
+                          <tr key={t.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-colors">
+                            <td className="px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">{t.name}</td>
+                            <td className="px-4 py-3 text-neutral-500 max-w-xs truncate text-xs">{t.content}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${metaStatusBadgeClass(t.metaStatus || 'NOT_FOUND')}`}>
+                                {displayMetaStatus(t.metaStatus)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-neutral-500">{t.status}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                <button type="button" className="text-xs font-semibold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1 transition-colors" onClick={() => navigate(`/communications/templates/${t.id}/edit`)}>
+                                  <Edit3 className="w-3 h-3" /> Edit
+                                </button>
+                                <button type="button" className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 inline-flex items-center gap-1 transition-colors" onClick={() => { setCloneSource({ id: t.id, name: t.name }); setCloneNewName(`Copy of ${t.name}`); setCloneOnMeta(false); }}>
+                                  <Copy className="w-3 h-3" /> Clone
+                                </button>
+                                <button type="button" disabled={syncingTemplateId === t.id} className="text-xs font-semibold text-brand-600 hover:text-brand-700 inline-flex items-center gap-1 disabled:opacity-50 transition-colors" onClick={() => updateTemplateStatus(t.id)}>
+                                  <RefreshCw className={`w-3 h-3 ${syncingTemplateId === t.id ? 'animate-spin' : ''}`} />
+                                  Sync
+                                </button>
+                                <button type="button" className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:text-neutral-800 dark:hover:text-neutral-100 inline-flex items-center gap-1 transition-colors" onClick={() => openMappingModal(t.id)}>
+                                  Map {`{{n}}`}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {!templates.length && (
+                          <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-neutral-500">No templates yet.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
-          )}
+              )}
             </>
-          )}
-
-          {activeTab === 'SEND' && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm space-y-3">
-              <div className="font-semibold">Send communication</div>
-              <div className="grid md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Template</label>
-                  <select
-                    value={selectedTemplateId}
-                    onChange={(e) => setSelectedTemplateId(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  >
-                    <option value="">Select template</option>
-                    {templates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.status})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-end">
-                  <label className="inline-flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={bulkMode} onChange={(e) => setBulkMode(e.target.checked)} />
-                    Bulk send
-                  </label>
-                </div>
-              </div>
-
-              {!bulkMode ? (
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">Contact</label>
-                  <select
-                    value={selectedContactId}
-                    onChange={(e) => setSelectedContactId(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                  >
-                    <option value="">Select contact</option>
-                    {contacts.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name || c.phone} ({c.phone})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 p-2 space-y-2">
-                  {contacts.map((c) => (
-                    <label key={c.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={!!selectedBulk[c.id]}
-                        onChange={(e) => setSelectedBulk((prev) => ({ ...prev, [c.id]: e.target.checked }))}
-                      />
-                      {c.name || 'Unknown'} ({c.phone})
-                    </label>
-                  ))}
-                  {!contacts.length && <div className="text-sm text-slate-500">No contacts available.</div>}
-                </div>
-              )}
-
-              <div className="text-xs text-slate-500">
-                Estimated charge: ₹
-                {bulkMode
-                  ? Object.values(selectedBulk).filter(Boolean).length * messageCost
-                  : selectedContactId
-                    ? messageCost
-                    : 0}
-              </div>
-              {selectedTemplate && (
-                <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 space-y-1">
-                  <div className="font-semibold text-slate-500">Template source</div>
-                  <div className="font-mono whitespace-pre-wrap break-words">{selectedTemplate.content}</div>
-                  {!bulkMode && sendPreview ? (
-                    <>
-                      <div className="font-semibold text-emerald-800 dark:text-emerald-200 pt-2">
-                        Resolved preview
-                      </div>
-                      <div className="whitespace-pre-wrap break-words">{sendPreview}</div>
-                    </>
-                  ) : null}
-                  {bulkMode ? (
-                    <p className="text-slate-500 pt-1">
-                      Bulk send: open a single contact to see a resolved preview.
-                    </p>
-                  ) : null}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={sendTemplate}
-                disabled={sending}
-                className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold"
-              >
-                {sending ? 'Sending...' : 'Send communication'}
-              </button>
-            </div>
           )}
         </div>
       </div>
+
+      {/* ── Clone modal ─────────────────────────────────────────────────── */}
+      <Modal
+        isOpen={!!cloneSource}
+        onClose={() => setCloneSource(null)}
+        title="Clone template"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setCloneSource(null)} disabled={cloneSubmitting}>Cancel</Button>
+            <Button variant="primary" size="sm" loading={cloneSubmitting} onClick={submitClone}>Clone</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-neutral-500">
+            From: <span className="font-semibold text-neutral-800 dark:text-neutral-200">{cloneSource?.name}</span>
+          </p>
+          <div>
+            <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-1.5">New template name</label>
+            <input value={cloneNewName} onChange={(e) => setCloneNewName(e.target.value)} className={inputCls} />
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm cursor-pointer text-neutral-700 dark:text-neutral-300">
+            <input type="checkbox" checked={cloneOnMeta} onChange={(e) => setCloneOnMeta(e.target.checked)} className="accent-brand-600 w-4 h-4" />
+            Also create on Meta (WhatsApp)
+          </label>
+        </div>
+      </Modal>
+
+      {/* ── Variable mapping modal ──────────────────────────────────────── */}
+      <Modal
+        isOpen={!!mappingModalId}
+        onClose={() => setMappingModalId('')}
+        title="Map numbered placeholders"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setMappingModalId('')}>Cancel</Button>
+            <Button variant="primary" size="sm" loading={mappingLoading} disabled={!mappingRows.length} onClick={saveTemplateMappings}>
+              Save mapping
+            </Button>
+          </div>
+        }
+      >
+        {mappingLoading && !mappingRows.length ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="w-5 h-5 text-neutral-400 animate-spin" />
+          </div>
+        ) : !mappingRows.length ? (
+          <p className="text-sm text-neutral-500">
+            This template has no <code className="font-mono">{`{{1}}`}</code>-style placeholders. Use named keys in
+            the template body instead.
+          </p>
+        ) : (
+          <div className="space-y-3 max-h-72 overflow-y-auto">
+            {mappingRows.map((row, idx) => (
+              <div key={row.placeholderIndex} className="grid grid-cols-[80px_1fr] gap-3 items-center">
+                <span className="text-xs font-mono text-neutral-500 bg-neutral-100 dark:bg-neutral-800 rounded px-2 py-1">
+                  {`{{${row.placeholderIndex}}}`}
+                </span>
+                <select
+                  value={row.variableKey}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMappingRows((prev) => prev.map((r, i) => (i === idx ? { ...r, variableKey: v } : r)));
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">— Select field —</option>
+                  {selectableVariableKeys.map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
