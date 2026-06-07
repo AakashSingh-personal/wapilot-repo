@@ -1,10 +1,14 @@
 import { prisma } from '../lib/prisma.js';
 import {
   createRazorpayOrder,
+  createRazorpayPaymentLink,
   fetchRazorpayOrder,
+  fetchRazorpayPaymentLink,
   razorpayPublicConfig,
+  verifyRazorpayCredentials,
   verifyRazorpayPaymentSignature,
 } from '../services/razorpay.service.js';
+import { activateProSubscription } from '../services/subscriptionBilling.service.js';
 
 function proAmount() {
   const raw = process.env.SUBSCRIPTION_PRO_AMOUNT || '999';
@@ -15,7 +19,11 @@ function proAmountPaise() {
   return Math.round(proAmount() * 100);
 }
 
-async function findReusableSubscriptionCheckout(businessId) {
+function useCheckoutFallback() {
+  return process.env.SUBSCRIPTION_USE_CHECKOUT === '1';
+}
+
+async function findReusableSubscriptionPayment(businessId) {
   const amt = proAmount();
   const pending = await prisma.payment.findFirst({
     where: {
@@ -28,76 +36,149 @@ async function findReusableSubscriptionCheckout(businessId) {
   });
   if (!pending?.providerOrderId) return null;
 
+  const ref = pending.providerOrderId;
   try {
-    const order = await fetchRazorpayOrder(pending.providerOrderId);
-    if (order.status === 'created' && Number(order.amount) === proAmountPaise()) {
-      return { payment: pending, order, amount: amt };
+    if (ref.startsWith('plink_')) {
+      const link = await fetchRazorpayPaymentLink(ref);
+      if (link.status === 'created' && Number(link.amount) === proAmountPaise()) {
+        return { payment: pending, paymentLinkUrl: link.short_url, amount: amt, mode: 'payment_link' };
+      }
+    } else if (ref.startsWith('order_')) {
+      const order = await fetchRazorpayOrder(ref);
+      if (order.status === 'created' && Number(order.amount) === proAmountPaise()) {
+        return {
+          payment: pending,
+          orderId: order.id,
+          amount: amt,
+          currency: order.currency || 'INR',
+          mode: 'checkout',
+        };
+      }
     }
   } catch {
-    // Order missing or keys changed — create a fresh checkout below.
+    // Stale reference or API keys changed.
   }
   return null;
+}
+
+async function createSubscriptionPaymentLink(businessId, userEmail) {
+  const amt = proAmount();
+
+  await prisma.payment.updateMany({
+    where: { businessId, type: 'SUBSCRIPTION', status: 'PENDING' },
+    data: { status: 'FAILED' },
+  });
+
+  const payment = await prisma.payment.create({
+    data: {
+      businessId,
+      amount: amt.toFixed(2),
+      type: 'SUBSCRIPTION',
+      status: 'PENDING',
+      provider: 'RAZORPAY',
+    },
+  });
+
+  const paymentLink = await createRazorpayPaymentLink({
+    amountInInr: amt,
+    description: 'WAPilot PRO subscription',
+    customer: userEmail ? { email: userEmail } : {},
+    notes: {
+      kind: 'subscription',
+      paymentId: payment.id,
+      businessId,
+      plan: 'PRO',
+    },
+  });
+
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { providerOrderId: paymentLink.id },
+  });
+
+  return {
+    paymentId: payment.id,
+    paymentLinkUrl: paymentLink.short_url,
+    amount: amt,
+    currency: paymentLink.currency || 'INR',
+    plan: 'PRO',
+    mode: 'payment_link',
+  };
+}
+
+async function createSubscriptionCheckoutOrder(businessId) {
+  const amt = proAmount();
+  const keyId = razorpayPublicConfig().keyId;
+
+  await prisma.payment.updateMany({
+    where: { businessId, type: 'SUBSCRIPTION', status: 'PENDING' },
+    data: { status: 'FAILED' },
+  });
+
+  const payment = await prisma.payment.create({
+    data: {
+      businessId,
+      amount: amt.toFixed(2),
+      type: 'SUBSCRIPTION',
+      status: 'PENDING',
+      provider: 'RAZORPAY',
+    },
+  });
+  const order = await createRazorpayOrder({
+    amountInInr: amt,
+    receipt: payment.id,
+    notes: {
+      kind: 'subscription',
+      paymentId: payment.id,
+      businessId,
+      plan: 'PRO',
+    },
+  });
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { providerOrderId: order.id },
+  });
+  return {
+    paymentId: payment.id,
+    orderId: order.id,
+    amount: amt,
+    currency: order.currency || 'INR',
+    keyId,
+    plan: 'PRO',
+    mode: 'checkout',
+  };
 }
 
 export async function subscriptionQr(req, res, next) {
   try {
     const businessId = req.user.businessId;
-    const keyId = razorpayPublicConfig().keyId;
-    if (!keyId) {
+    if (!razorpayPublicConfig().keyId) {
       return res.status(503).json({ error: 'Razorpay is not configured on the server' });
     }
 
-    const reusable = await findReusableSubscriptionCheckout(businessId);
+    try {
+      await verifyRazorpayCredentials();
+    } catch (e) {
+      return res.status(503).json({
+        error: 'Razorpay API keys are invalid or mismatched. Check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET on the server.',
+        detail: e.message,
+      });
+    }
+
+    const reusable = await findReusableSubscriptionPayment(businessId);
     if (reusable) {
       return res.json({
-        paymentId: reusable.payment.id,
-        orderId: reusable.order.id,
-        amount: reusable.amount,
-        currency: reusable.order.currency || 'INR',
-        keyId,
-        plan: 'PRO',
+        ...reusable,
+        keyId: razorpayPublicConfig().keyId,
         reused: true,
       });
     }
 
-    const amt = proAmount();
+    const payload = useCheckoutFallback()
+      ? await createSubscriptionCheckoutOrder(businessId)
+      : await createSubscriptionPaymentLink(businessId, req.user.email);
 
-    await prisma.payment.updateMany({
-      where: { businessId, type: 'SUBSCRIPTION', status: 'PENDING' },
-      data: { status: 'FAILED' },
-    });
-
-    const payment = await prisma.payment.create({
-      data: {
-        businessId,
-        amount: amt.toFixed(2),
-        type: 'SUBSCRIPTION',
-        status: 'PENDING',
-        provider: 'RAZORPAY',
-      },
-    });
-    const order = await createRazorpayOrder({
-      amountInInr: amt,
-      receipt: payment.id,
-      notes: {
-        paymentId: payment.id,
-        businessId,
-        plan: 'PRO',
-      },
-    });
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: { providerOrderId: order.id },
-    });
-    res.json({
-      paymentId: payment.id,
-      orderId: order.id,
-      amount: amt,
-      currency: order.currency || 'INR',
-      keyId,
-      plan: 'PRO',
-      reused: false,
-    });
+    res.json({ ...payload, reused: false });
   } catch (e) {
     next(e);
   }
@@ -141,33 +222,10 @@ export async function verifySubscriptionPayment(req, res, next) {
     });
     if (!valid) return res.status(400).json({ error: 'Invalid Razorpay signature' });
 
-    const expires = new Date();
-    expires.setMonth(expires.getMonth() + 1);
-
-    await prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: 'SUCCESS',
-          providerOrderId: razorpay_order_id,
-          providerPaymentId: razorpay_payment_id,
-          providerSignature: razorpay_signature,
-          provider: 'RAZORPAY',
-        },
-      });
-      await tx.subscription.updateMany({
-        where: { businessId: req.user.businessId },
-        data: { status: 'EXPIRED' },
-      });
-      await tx.subscription.create({
-        data: {
-          businessId: req.user.businessId,
-          plan: 'PRO',
-          status: 'ACTIVE',
-          amount: payment.amount,
-          expiresAt: expires,
-        },
-      });
+    await activateProSubscription(req.user.businessId, payment.id, {
+      providerOrderId: razorpay_order_id,
+      providerPaymentId: razorpay_payment_id,
+      providerSignature: razorpay_signature,
     });
 
     res.json({ ok: true });
@@ -193,9 +251,21 @@ export async function subscriptionStatus(req, res, next) {
         orderBy: { createdAt: 'desc' },
       }),
     ]);
+
+    let pendingPaymentLinkUrl = null;
+    if (pending?.providerOrderId?.startsWith('plink_')) {
+      try {
+        const link = await fetchRazorpayPaymentLink(pending.providerOrderId);
+        if (link.status === 'created') pendingPaymentLinkUrl = link.short_url;
+      } catch {
+        // ignore
+      }
+    }
+
     res.json({
       subscription: sub,
       pendingPayment: pending,
+      pendingPaymentLinkUrl,
       latestPayment: latest,
       razorpayKeyId: razorpayPublicConfig().keyId || null,
     });

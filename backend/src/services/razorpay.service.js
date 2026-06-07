@@ -63,6 +63,29 @@ export async function createRazorpayPaymentLink({
   });
 }
 
+export async function fetchRazorpayPaymentLink(linkId) {
+  if (!linkId) throw new Error('linkId required');
+  const client = getRazorpayClient();
+  return client.paymentLink.fetch(linkId);
+}
+
+/** Quick sanity check that KEY_ID + KEY_SECRET belong together. */
+export async function verifyRazorpayCredentials() {
+  try {
+    const client = getRazorpayClient();
+    await client.orders.all({ count: 1 });
+    return { keyId: razorpayPublicConfig().keyId };
+  } catch (e) {
+    const desc =
+      e?.error?.description ||
+      e?.message ||
+      'Razorpay authentication failed — KEY_ID and KEY_SECRET may not match';
+    const err = new Error(desc);
+    err.statusCode = e?.statusCode || 503;
+    throw err;
+  }
+}
+
 export function verifyRazorpayPaymentSignature({ orderId, paymentId, signature }) {
   const secret = process.env.RAZORPAY_KEY_SECRET || '';
   if (!secret) throw new Error('Missing RAZORPAY_KEY_SECRET');

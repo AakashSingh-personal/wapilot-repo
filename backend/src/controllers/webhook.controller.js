@@ -3,6 +3,7 @@ import * as webhookService from '../services/webhook.service.js';
 import { prisma } from '../lib/prisma.js';
 import { publishInboxLive } from '../realtime/publishInbox.js';
 import { EventType } from '../realtime/events.js';
+import { activateProSubscription } from '../services/subscriptionBilling.service.js';
 import { verifyRazorpayWebhookSignature } from '../services/razorpay.service.js';
 import { sendWhatsAppText } from '../services/whatsapp.service.js';
 import { settleAppointmentPaymentFromWebhook } from '../scheduling/appointmentPayment.service.js';
@@ -358,30 +359,9 @@ export async function receiveRazorpayWebhook(req, res) {
           });
         }
         if (payment && payment.status !== 'SUCCESS' && payment.type === 'SUBSCRIPTION') {
-          const expires = new Date();
-          expires.setMonth(expires.getMonth() + 1);
-          await prisma.$transaction(async (tx) => {
-            await tx.payment.update({
-              where: { id: payment.id },
-              data: {
-                status: 'SUCCESS',
-                provider: 'RAZORPAY',
-                providerPaymentId: paymentId,
-              },
-            });
-            await tx.subscription.updateMany({
-              where: { businessId: payment.businessId },
-              data: { status: 'EXPIRED' },
-            });
-            await tx.subscription.create({
-              data: {
-                businessId: payment.businessId,
-                plan: 'PRO',
-                status: 'ACTIVE',
-                amount: payment.amount,
-                expiresAt: expires,
-              },
-            });
+          await activateProSubscription(payment.businessId, payment.id, {
+            providerOrderId: orderId,
+            providerPaymentId: paymentId,
           });
         }
       }
@@ -393,6 +373,13 @@ export async function receiveRazorpayWebhook(req, res) {
       const linkId = link?.id;
       const notes = link?.notes || paymentEntity?.notes || {};
       if (linkId) {
+        if (notes?.kind === 'subscription' && notes?.paymentId && notes?.businessId) {
+          await activateProSubscription(String(notes.businessId), String(notes.paymentId), {
+            providerLinkId: linkId,
+            providerPaymentId: paymentEntity?.id || null,
+          });
+        }
+
         if (notes?.kind === 'appointment_payment') {
           await settleAppointmentPaymentFromWebhook({
             providerLinkId: linkId,

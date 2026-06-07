@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../services/api.js';
 
 export default function Billing() {
@@ -6,10 +6,12 @@ export default function Billing() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [loadingPay, setLoadingPay] = useState(false);
+  const pollRef = useRef(null);
 
   async function refresh() {
     const { data } = await api.get('/billing/status');
     setStatus(data);
+    return data;
   }
 
   useEffect(() => {
@@ -23,8 +25,28 @@ export default function Billing() {
     })();
     return () => {
       cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
+
+  function startPaymentPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const data = await refresh();
+        if (data?.subscription?.status === 'ACTIVE' || !data?.pendingPayment) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          if (data?.subscription?.status === 'ACTIVE') {
+            setMsg('Payment successful. PRO activated.');
+            setError('');
+          }
+        }
+      } catch {
+        // keep polling
+      }
+    }, 3000);
+  }
 
   async function ensureRazorpayScript() {
     if (window.Razorpay) return true;
@@ -37,61 +59,84 @@ export default function Billing() {
     });
   }
 
+  async function openCheckout(data) {
+    const loaded = await ensureRazorpayScript();
+    if (!loaded) {
+      setError('Could not load Razorpay checkout script');
+      return;
+    }
+    const options = {
+      key: data.keyId,
+      currency: data.currency || 'INR',
+      name: 'WAPilot',
+      description: `Upgrade to ${data.plan}`,
+      order_id: data.orderId,
+      handler: async (resp) => {
+        try {
+          await api.patch(`/billing/payments/${data.paymentId}/verify`, {
+            razorpay_order_id: resp.razorpay_order_id,
+            razorpay_payment_id: resp.razorpay_payment_id,
+            razorpay_signature: resp.razorpay_signature,
+          });
+          await refresh();
+          setMsg('Payment successful. PRO activated.');
+        } catch (e) {
+          setError(e.response?.data?.error || 'Payment verification failed');
+        }
+      },
+      modal: {
+        ondismiss: async () => {
+          await refresh();
+        },
+      },
+      theme: { color: '#4f46e5' },
+    };
+    const rzp = new window.Razorpay(options);
+    rzp.on('payment.failed', async (resp) => {
+      await refresh();
+      const desc = resp?.error?.description || resp?.error?.reason || '';
+      setError(
+        /token/i.test(desc)
+          ? 'Saved card rejected by Razorpay. Use UPI or enter a new card (do not pick a saved card).'
+          : desc || 'Payment failed or was cancelled.',
+      );
+    });
+    rzp.open();
+  }
+
   async function openUpgrade() {
     setError('');
     setMsg('');
     setLoadingPay(true);
     try {
-      const loaded = await ensureRazorpayScript();
-      if (!loaded) {
-        setError('Could not load Razorpay checkout script');
+      const { data } = await api.get('/billing/pro-qr');
+
+      if (data.paymentLinkUrl) {
+        window.open(data.paymentLinkUrl, '_blank', 'noopener,noreferrer');
+        setMsg('Complete payment in the Razorpay tab. This page updates when payment is captured.');
+        startPaymentPolling();
         return;
       }
-      const { data } = await api.get('/billing/pro-qr');
-      const options = {
-        key: data.keyId,
-        currency: data.currency || 'INR',
-        name: 'WAPilot',
-        description: `Upgrade to ${data.plan}`,
-        order_id: data.orderId,
-        handler: async (resp) => {
-          try {
-            await api.patch(`/billing/payments/${data.paymentId}/verify`, {
-              razorpay_order_id: resp.razorpay_order_id,
-              razorpay_payment_id: resp.razorpay_payment_id,
-              razorpay_signature: resp.razorpay_signature,
-            });
-            await refresh();
-            setMsg('Payment successful. PRO activated.');
-          } catch (e) {
-            setError(e.response?.data?.error || 'Payment verification failed');
-          }
-        },
-        modal: {
-          ondismiss: async () => {
-            await refresh();
-          },
-        },
-        theme: { color: '#4f46e5' },
-      };
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', async (resp) => {
-        await refresh();
-        const desc = resp?.error?.description || resp?.error?.reason || '';
-        if (/token/i.test(desc)) {
-          setError(
-            'Saved card token is invalid or expired. Pay with a new card, or clear cookies for razorpay.com and retry.',
-          );
-        } else {
-          setError(desc || 'Payment failed or was cancelled.');
-        }
-      });
-      rzp.open();
+
+      if (data.mode === 'checkout' && data.orderId) {
+        await openCheckout(data);
+        return;
+      }
+
+      setError('Could not start payment — invalid server response');
     } catch (e) {
-      setError(e.response?.data?.error || 'Could not start Razorpay checkout');
+      setError(e.response?.data?.error || e.response?.data?.detail || 'Could not start Razorpay payment');
     } finally {
       setLoadingPay(false);
     }
+  }
+
+  function reopenPendingLink() {
+    const url = status?.pendingPaymentLinkUrl;
+    if (!url) return;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setMsg('Complete payment in the Razorpay tab.');
+    startPaymentPolling();
   }
 
   return (
@@ -124,6 +169,9 @@ export default function Billing() {
               {status?.subscription?.expiresAt &&
                 ` · Renews / expires ${new Date(status.subscription.expiresAt).toLocaleDateString()}`}
             </div>
+            {status?.razorpayKeyId && (
+              <div className="text-xs text-slate-400 mt-1 font-mono">Razorpay: {status.razorpayKeyId}</div>
+            )}
           </div>
           <button
             type="button"
@@ -142,11 +190,22 @@ export default function Billing() {
                 Pending subscription payment
               </div>
               <div className="text-xs text-amber-800/80 dark:text-amber-200/80">
-                Waiting for Razorpay payment capture. Status updates automatically.
+                Complete payment on Razorpay. Avoid saved cards if you see &quot;Invalid Token&quot; — use UPI or a new card.
               </div>
             </div>
-            <div className="text-xs font-mono text-amber-800/80">
-              {status.pendingPayment.providerOrderId || status.pendingPayment.id}
+            <div className="flex flex-col items-end gap-2">
+              <div className="text-xs font-mono text-amber-800/80">
+                {status.pendingPayment.providerOrderId || status.pendingPayment.id}
+              </div>
+              {status.pendingPaymentLinkUrl && (
+                <button
+                  type="button"
+                  onClick={reopenPendingLink}
+                  className="text-xs font-semibold text-brand-700 dark:text-brand-300"
+                >
+                  Open payment link
+                </button>
+              )}
             </div>
           </div>
         )}
