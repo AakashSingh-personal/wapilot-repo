@@ -13,6 +13,7 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "test": "node --test tests/**/*.test.js",
     "test:scheduling": "node --test tests/scheduling/**/*.test.js",
     "test:scheduling:load": "node --test tests/scheduling/load-concurrent-bookings.test.js",
@@ -20,10 +21,11 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "6.19.2",
-    "@supabase/supabase-js": "^2.105.3",
     "@aws-sdk/client-s3": "^3.812.0",
     "@aws-sdk/s3-request-presigner": "^3.812.0",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "@supabase/supabase-js": "^2.105.3",
     "amqplib": "^0.10.8",
     "axios": "^1.9.0",
     "bcryptjs": "^3.0.2",
@@ -35,6 +37,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.10.1",
     "openai": "^4.96.0",
+    "pg": "^8.16.0",
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.6",
     "rrule": "^2.8.1",
@@ -42,6 +45,6 @@
     "ws": "^8.20.1"
   },
   "devDependencies": {
-    "prisma": "6.19.2"
+    "prisma": "^7.8.0"
   }
 }
