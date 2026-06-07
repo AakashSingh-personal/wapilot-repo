@@ -33,3 +33,6 @@ services:
       # Redis guard — daily command limit for Upstash free tier
       - key: REDIS_DAILY_LIMIT
         value: "9500"
+      # Cloudflare Pages production frontend (add custom domains comma-separated)
+      - key: CORS_ORIGIN
+        value: "https://wapilot.pages.dev"

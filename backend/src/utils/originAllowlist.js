@@ -8,7 +8,11 @@ function configuredOrigins() {
     .filter(Boolean);
 }
 
-const fallbackOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173']);
+const fallbackOrigins = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://wapilot.pages.dev',
+]);
 
 export function isAllowedOrigin(origin) {
   if (!origin) return true;
