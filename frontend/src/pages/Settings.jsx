@@ -1,7 +1,21 @@
 import { useEffect, useState } from 'react';
+import {
+  Building2, Phone, User, HeadphonesIcon, Sparkles, Package,
+  Wrench, Clock, Bell, CreditCard, Plus, Trash2, ArrowUp, ArrowDown, Copy,
+  Save, CheckCircle2, AlertCircle, Upload,
+} from 'lucide-react';
 import { api } from '../services/api.js';
 import UserManagement from './UserManagement.jsx';
+import { Card } from '../components/ui/Card.jsx';
+import { PageHeader } from '../components/ui/PageHeader.jsx';
+import { Tabs } from '../components/ui/Tabs.jsx';
+import { Input } from '../components/ui/Input.jsx';
+import { Textarea } from '../components/ui/Textarea.jsx';
+import { Toggle } from '../components/ui/Toggle.jsx';
+import { Button } from '../components/ui/Button.jsx';
+import { Spinner } from '../components/ui/Spinner.jsx';
 
+/* ─── Catalog helpers (same logic, new UI) ────────────────────────────────── */
 function normalizeItems(input) {
   if (!Array.isArray(input)) return [];
   return input.map((item) => {
@@ -25,33 +39,19 @@ function CatalogEditor({ title, items, onChange, addLabel }) {
   const [uploadingIndex, setUploadingIndex] = useState(-1);
 
   function updateAt(index, key, value) {
-    const next = items.map((it, i) => (i === index ? { ...it, [key]: value } : it));
-    onChange(next);
+    onChange(items.map((it, i) => (i === index ? { ...it, [key]: value } : it)));
   }
-
-  function removeAt(index) {
-    onChange(items.filter((_, i) => i !== index));
+  function removeAt(index) { onChange(items.filter((_, i) => i !== index)); }
+  function addOne() { onChange([...items, emptyItem()]); }
+  function moveItem(index, dir) {
+    const next = index + dir;
+    if (next < 0 || next >= items.length) return;
+    const arr = [...items];
+    [arr[index], arr[next]] = [arr[next], arr[index]];
+    onChange(arr);
   }
-
-  function addOne() {
-    onChange([...items, emptyItem()]);
-  }
-
-  function moveItem(index, direction) {
-    const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= items.length) return;
-    const next = [...items];
-    const current = next[index];
-    next[index] = next[nextIndex];
-    next[nextIndex] = current;
-    onChange(next);
-  }
-
   function duplicateAt(index) {
-    const source = items[index];
-    if (!source) return;
-    const clone = { ...source };
-    onChange([...items.slice(0, index + 1), clone, ...items.slice(index + 1)]);
+    onChange([...items.slice(0, index + 1), { ...items[index] }, ...items.slice(index + 1)]);
   }
 
   async function uploadItemImage(index, file) {
@@ -71,121 +71,117 @@ function CatalogEditor({ title, items, onChange, addLabel }) {
       });
       updateAt(index, 'imageUrl', data.publicUrl || '');
     } catch {
-      // Leave field unchanged on upload failure.
+      // Leave field unchanged on upload failure
     } finally {
       setUploadingIndex(-1);
     }
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{title}</label>
-        <button
-          type="button"
-          onClick={addOne}
-          className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium"
-        >
+        <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">{title}</p>
+        <Button variant="secondary" size="sm" iconLeft={<Plus className="w-3.5 h-3.5" />} onClick={addOne}>
           {addLabel}
-        </button>
+        </Button>
       </div>
+
+      {items.length === 0 && (
+        <p className="text-xs text-neutral-400 italic py-2">
+          No {title.toLowerCase()} yet — click "{addLabel}" to add one.
+        </p>
+      )}
+
       <div className="space-y-3">
         {items.map((item, index) => (
           <div
             key={`${title}-${index}`}
-            className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2"
+            className="rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/40 p-4 space-y-3"
           >
-            <div className="grid sm:grid-cols-2 gap-2">
-              <input
-                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Input
+                placeholder="Name"
                 value={item.name}
                 onChange={(e) => updateAt(index, 'name', e.target.value)}
-                placeholder="Name"
               />
-              <input
-                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+              <Input
+                placeholder="Price (e.g. ₹499)"
                 value={item.price}
                 onChange={(e) => updateAt(index, 'price', e.target.value)}
-                placeholder="Price (e.g. 499 or ₹499)"
               />
             </div>
-            <textarea
+            <Textarea
               rows={2}
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+              placeholder="Short description"
               value={item.description}
               onChange={(e) => updateAt(index, 'description', e.target.value)}
-              placeholder="Short description"
             />
             <div className="space-y-2">
-              <input
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+              <Input
+                placeholder="Image URL (optional)"
                 value={item.imageUrl || ''}
                 onChange={(e) => updateAt(index, 'imageUrl', e.target.value)}
-                placeholder="Image URL (optional)"
               />
-              <div className="flex items-center gap-3 text-xs">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => uploadItemImage(index, e.target.files?.[0])}
-                  className="text-xs"
-                />
-                {uploadingIndex === index && <span className="text-slate-500">Uploading image...</span>}
+              <div className="flex items-center gap-3">
+                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-600 dark:text-neutral-400 cursor-pointer hover:text-brand-600 transition-colors">
+                  <Upload className="w-3.5 h-3.5" />
+                  Upload image
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => uploadItemImage(index, e.target.files?.[0])}
+                  />
+                </label>
+                {uploadingIndex === index && <Spinner size="xs" />}
               </div>
-              {item.imageUrl ? (
+              {item.imageUrl && (
                 <img
                   src={item.imageUrl}
-                  alt={item.name || `${title} image`}
-                  className="h-20 w-20 rounded-lg object-cover border border-slate-200 dark:border-slate-700"
+                  alt={item.name}
+                  className="h-16 w-16 rounded-lg object-cover border border-neutral-200 dark:border-neutral-700"
                 />
-              ) : null}
+              )}
             </div>
-            <div className="flex items-center gap-3 text-xs">
-              <button
-                type="button"
-                onClick={() => moveItem(index, -1)}
+            <div className="flex items-center gap-2 pt-1">
+              <Button
+                variant="ghost" size="xs"
+                icon={<ArrowUp className="w-3.5 h-3.5" />}
                 disabled={index === 0}
-                className="font-medium text-slate-600 disabled:opacity-40 dark:text-slate-300"
-              >
-                Move up
-              </button>
-              <button
-                type="button"
-                onClick={() => moveItem(index, 1)}
+                onClick={() => moveItem(index, -1)}
+                title="Move up"
+              />
+              <Button
+                variant="ghost" size="xs"
+                icon={<ArrowDown className="w-3.5 h-3.5" />}
                 disabled={index === items.length - 1}
-                className="font-medium text-slate-600 disabled:opacity-40 dark:text-slate-300"
-              >
-                Move down
-              </button>
-              <button
-                type="button"
+                onClick={() => moveItem(index, 1)}
+                title="Move down"
+              />
+              <Button
+                variant="ghost" size="xs"
+                icon={<Copy className="w-3.5 h-3.5" />}
                 onClick={() => duplicateAt(index)}
-                className="font-medium text-brand-700 dark:text-brand-300"
-              >
-                Duplicate
-              </button>
-              <button
-                type="button"
+                title="Duplicate"
+              />
+              <div className="flex-1" />
+              <Button
+                variant="ghost" size="xs"
+                icon={<Trash2 className="w-3.5 h-3.5 text-error-500" />}
                 onClick={() => removeAt(index)}
-                className="font-medium text-red-600 dark:text-red-400"
-              >
-                Remove
-              </button>
+                title="Remove"
+              />
             </div>
           </div>
         ))}
       </div>
-      {!items.length && (
-        <div className="text-xs text-slate-500 dark:text-slate-400">
-          No items yet. Click “{addLabel}” to add.
-        </div>
-      )}
     </div>
   );
 }
 
+/* ─── Settings page ──────────────────────────────────────────────────────── */
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState('GENERAL');
+  const [activeTab, setActiveTab] = useState('general');
   const [businessName, setBusinessName] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [services, setServices] = useState([]);
@@ -200,6 +196,7 @@ export default function Settings() {
   const [workingHours, setWorkingHours] = useState('{}');
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(true);
   const [upiId, setUpiId] = useState('');
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
   const [error, setError] = useState('');
 
@@ -231,48 +228,36 @@ export default function Settings() {
         if (!cancelled) setError(e.response?.data?.error || 'Failed to load config');
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   async function save(e) {
     e.preventDefault();
-    setError('');
-    setSaved('');
+    setError(''); setSaved('');
     let wh = workingHours;
     try {
-      const parsed = JSON.parse(workingHours);
-      wh = JSON.stringify(parsed);
+      wh = JSON.stringify(JSON.parse(workingHours));
     } catch {
       setError('Working hours must be valid JSON (e.g. {"slots":["3 PM","5 PM"]})');
       return;
     }
 
-    const cleanServices = services
-      .map((item) => ({
+    const clean = (arr) => arr
+      .map(item => ({
         name: item.name?.trim() || '',
         price: item.price?.trim() || '',
         description: item.description?.trim() || '',
         imageUrl: item.imageUrl?.trim() || '',
       }))
-      .filter((item) => item.name || item.price || item.description || item.imageUrl);
+      .filter(item => item.name || item.price || item.description || item.imageUrl);
 
-    const cleanProducts = products
-      .map((item) => ({
-        name: item.name?.trim() || '',
-        price: item.price?.trim() || '',
-        description: item.description?.trim() || '',
-        imageUrl: item.imageUrl?.trim() || '',
-      }))
-      .filter((item) => item.name || item.price || item.description || item.imageUrl);
-
+    setSaving(true);
     try {
       await api.put('/config', {
         businessName,
         phoneNumberId: phoneNumberId || null,
-        services: cleanServices,
-        products: cleanProducts,
+        services: clean(services),
+        products: clean(products),
         clientDetails: clientDetails || '',
         clientProfile: {
           business_name: clientProfile.business_name?.trim() || '',
@@ -284,200 +269,182 @@ export default function Settings() {
         autoReplyEnabled,
         upiId: upiId || null,
       });
-      setSaved('Saved successfully.');
+      setSaved('Settings saved successfully.');
+      setTimeout(() => setSaved(''), 3000);
     } catch (err) {
       setError(err.response?.data?.error || 'Save failed');
+    } finally {
+      setSaving(false);
     }
   }
 
+  const tabs = [
+    { value: 'general', label: 'General' },
+    { value: 'users',   label: 'User Management' },
+  ];
+
   return (
-    <div className="space-y-6 max-w-6xl">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Settings</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">
-          Add client profile details plus services/products so AI replies are specific to each business.
-        </p>
-      </div>
+    <div className="space-y-5 max-w-4xl">
+      <PageHeader title="Settings" subtitle="Configure your business profile, AI context, and team" />
 
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setActiveTab('GENERAL')}
-          className={[
-            'rounded-lg px-3 py-1.5 text-sm font-semibold border',
-            activeTab === 'GENERAL'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800',
-          ].join(' ')}
-        >
-          General
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('USER_MANAGEMENT')}
-          className={[
-            'rounded-lg px-3 py-1.5 text-sm font-semibold border',
-            activeTab === 'USER_MANAGEMENT'
-              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white'
-              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800',
-          ].join(' ')}
-        >
-          User Management
-        </button>
-      </div>
+      <Tabs value={activeTab} onChange={setActiveTab} items={tabs} />
 
-      {activeTab === 'GENERAL' && error && (
-        <div className="rounded-lg bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm px-3 py-2">
-          {error}
-        </div>
-      )}
-      {activeTab === 'GENERAL' && saved && (
-        <div className="rounded-lg bg-brand-50 dark:bg-brand-900/30 text-brand-900 dark:text-brand-100 text-sm px-3 py-2">
-          {saved}
-        </div>
-      )}
+      {activeTab === 'users' && <UserManagement embedded />}
 
-      {activeTab === 'GENERAL' && (
-      <form onSubmit={save} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm space-y-4 max-w-2xl">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Business name</label>
-          <input
-            className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-            value={businessName}
-            onChange={(e) => setBusinessName(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-            WhatsApp Phone Number ID (Meta)
-          </label>
-          <input
-            className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-mono"
-            value={phoneNumberId}
-            onChange={(e) => setPhoneNumberId(e.target.value)}
-            placeholder="Matches webhook metadata.phone_number_id"
-          />
-        </div>
-        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/40 p-4 space-y-3">
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-            Client profile — templates & campaigns
+      {activeTab === 'general' && (
+        <form onSubmit={save} className="space-y-5">
+          {error && (
+            <div className="flex items-start gap-2.5 rounded-lg bg-error-50 dark:bg-error-950/40 border border-error-200 dark:border-error-800 text-error-700 dark:text-error-300 text-sm px-4 py-3">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              {error}
+            </div>
+          )}
+          {saved && (
+            <div className="flex items-center gap-2.5 rounded-lg bg-success-50 dark:bg-success-950/40 border border-success-200 dark:border-success-800 text-success-700 dark:text-success-400 text-sm px-4 py-3">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              {saved}
+            </div>
+          )}
+
+          {/* Business identity */}
+          <Card>
+            <Card.Header
+              title="Business identity"
+              subtitle="Core details used across the platform"
+            />
+            <Card.Body className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Input
+                  label="Business name"
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  prefix={<Building2 className="w-4 h-4" />}
+                />
+                <Input
+                  label="WhatsApp Phone Number ID (Meta)"
+                  value={phoneNumberId}
+                  onChange={(e) => setPhoneNumberId(e.target.value)}
+                  placeholder="Matches webhook metadata"
+                  prefix={<Phone className="w-4 h-4" />}
+                  className="font-mono"
+                />
+              </div>
+            </Card.Body>
+          </Card>
+
+          {/* Client profile */}
+          <Card>
+            <Card.Header
+              title="Client profile"
+              subtitle="Used in template variables like {{business_name}}, {{business_phone}}"
+            />
+            <Card.Body>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Input
+                  label="Display business name"
+                  value={clientProfile.business_name}
+                  onChange={(e) => setClientProfile(p => ({ ...p, business_name: e.target.value }))}
+                  placeholder="e.g. GlowCraft Salon"
+                  prefix={<Building2 className="w-4 h-4" />}
+                />
+                <Input
+                  label="Display business phone"
+                  value={clientProfile.business_phone}
+                  onChange={(e) => setClientProfile(p => ({ ...p, business_phone: e.target.value }))}
+                  placeholder="+91…"
+                  prefix={<Phone className="w-4 h-4" />}
+                />
+                <Input
+                  label="Owner / public name"
+                  value={clientProfile.business_owner_name}
+                  onChange={(e) => setClientProfile(p => ({ ...p, business_owner_name: e.target.value }))}
+                  placeholder="Name customers see"
+                  prefix={<User className="w-4 h-4" />}
+                />
+                <Input
+                  label="Support number"
+                  value={clientProfile.business_support_number}
+                  onChange={(e) => setClientProfile(p => ({ ...p, business_support_number: e.target.value }))}
+                  placeholder="Support WhatsApp or phone"
+                  prefix={<HeadphonesIcon className="w-4 h-4" />}
+                />
+              </div>
+            </Card.Body>
+          </Card>
+
+          {/* AI context */}
+          <Card>
+            <Card.Header
+              title="AI context"
+              subtitle="Business details, tone, policies, and FAQs for the AI to reference"
+            />
+            <Card.Body>
+              <Textarea
+                rows={6}
+                value={clientDetails}
+                onChange={(e) => setClientDetails(e.target.value)}
+                placeholder="Example: We are Glow Clinic in Jaipur. Friendly tone. 10am-8pm Mon–Sat. No refunds after 24 hours."
+              />
+            </Card.Body>
+          </Card>
+
+          {/* Services catalog */}
+          <Card>
+            <Card.Header title="Services" subtitle="AI uses these for booking and queries" />
+            <Card.Body>
+              <CatalogEditor title="Services" items={services} onChange={setServices} addLabel="Add Service" />
+            </Card.Body>
+          </Card>
+
+          {/* Products catalog */}
+          <Card>
+            <Card.Header title="Products" subtitle="Products available at your business" />
+            <Card.Body>
+              <CatalogEditor title="Products" items={products} onChange={setProducts} addLabel="Add Product" />
+            </Card.Body>
+          </Card>
+
+          {/* Operations */}
+          <Card>
+            <Card.Header title="Operations" />
+            <Card.Body className="space-y-5">
+              <Textarea
+                label="Working hours / slots (JSON)"
+                rows={4}
+                value={workingHours}
+                onChange={(e) => setWorkingHours(e.target.value)}
+                className="font-mono text-xs"
+                helper='Example: {"slots":["10 AM","12 PM","3 PM","5 PM"]}'
+              />
+              <Toggle
+                checked={autoReplyEnabled}
+                onChange={(e) => setAutoReplyEnabled(e.target.checked)}
+                label="Auto-reply enabled on WhatsApp"
+              />
+              <Input
+                label="Business UPI ID"
+                value={upiId}
+                onChange={(e) => setUpiId(e.target.value)}
+                placeholder="salon@paytm"
+                helper="Used for customer payment collections"
+                prefix={<CreditCard className="w-4 h-4" />}
+              />
+            </Card.Body>
+          </Card>
+
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              loading={saving}
+              iconLeft={<Save className="w-4 h-4" />}
+            >
+              Save settings
+            </Button>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Shown when messages use{' '}
-            <code className="font-mono text-[11px]">{'{{business_name}}'}</code>,{' '}
-            <code className="font-mono text-[11px]">{'{{business_phone}}'}</code>, etc. Falls back to your legal
-            business name above only if display name is left empty.
-          </p>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">Display business name</label>
-              <input
-                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                value={clientProfile.business_name}
-                onChange={(e) => setClientProfile((p) => ({ ...p, business_name: e.target.value }))}
-                placeholder="e.g. GlowCraft Salon"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">Display business phone</label>
-              <input
-                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                value={clientProfile.business_phone}
-                onChange={(e) => setClientProfile((p) => ({ ...p, business_phone: e.target.value }))}
-                placeholder="+91…"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">Owner / public name</label>
-              <input
-                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                value={clientProfile.business_owner_name}
-                onChange={(e) => setClientProfile((p) => ({ ...p, business_owner_name: e.target.value }))}
-                placeholder="Name customers see"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-300">Support number</label>
-              <input
-                className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                value={clientProfile.business_support_number}
-                onChange={(e) => setClientProfile((p) => ({ ...p, business_support_number: e.target.value }))}
-                placeholder="Support WhatsApp or phone"
-              />
-            </div>
-          </div>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-            Client details for AI (about business, tone, policies, FAQs)
-          </label>
-          <textarea
-            rows={5}
-            className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-            value={clientDetails}
-            onChange={(e) => setClientDetails(e.target.value)}
-            placeholder="Example: We are Glow Clinic in Jaipur. Friendly tone. 10am-8pm support. No refunds after 24h."
-          />
-        </div>
-        <div>
-          <CatalogEditor
-            title="Services"
-            items={services}
-            onChange={setServices}
-            addLabel="Add Service"
-          />
-        </div>
-        <div>
-          <CatalogEditor
-            title="Products"
-            items={products}
-            onChange={setProducts}
-            addLabel="Add Product"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-            Working hours / slots (JSON)
-          </label>
-          <textarea
-            rows={4}
-            className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-mono"
-            value={workingHours}
-            onChange={(e) => setWorkingHours(e.target.value)}
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <input
-            id="auto"
-            type="checkbox"
-            checked={autoReplyEnabled}
-            onChange={(e) => setAutoReplyEnabled(e.target.checked)}
-          />
-          <label htmlFor="auto" className="text-sm text-slate-700 dark:text-slate-300">
-            Auto-reply enabled on WhatsApp
-          </label>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-            Business UPI ID (customer payments)
-          </label>
-          <input
-            className="mt-1 w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-            value={upiId}
-            onChange={(e) => setUpiId(e.target.value)}
-            placeholder="salon@paytm"
-          />
-        </div>
-        <button
-          type="submit"
-          className="rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold px-5 py-2.5 text-sm"
-        >
-          Save settings
-        </button>
-      </form>
+        </form>
       )}
-
-      {activeTab === 'USER_MANAGEMENT' && <UserManagement embedded />}
     </div>
   );
 }

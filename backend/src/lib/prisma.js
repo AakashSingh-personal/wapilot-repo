@@ -6,7 +6,16 @@ import { resolveDatabaseUrl } from './resolveDatabaseUrl.js';
 const globalForPrisma = globalThis;
 
 function poolOptions(connectionString) {
-  const opts = { connectionString };
+  const opts = {
+    connectionString,
+    // ── Free-tier tuning (Render 512 MB + Neon serverless) ──────────────────
+    // Neon suspends compute after ~5 min inactivity; keep pool small so
+    // cold-start reconnects happen fast and RAM usage stays low.
+    max: Number(process.env.DB_POOL_MAX || 3),
+    min: Number(process.env.DB_POOL_MIN || 0),
+    idleTimeoutMillis:  Number(process.env.DB_IDLE_TIMEOUT_MS  || 10_000),
+    connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS || 8_000),
+  };
   if (/sslmode=require|neon\.tech|amazonaws\.com/i.test(connectionString || '')) {
     // Validate the server certificate by default (protects against MITM).
     // Neon uses Let's Encrypt; AWS RDS uses Amazon root CAs — both trusted by Node's
