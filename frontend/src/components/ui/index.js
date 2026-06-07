@@ -4,6 +4,7 @@ export { Badge, AppointmentStatusBadge, ApptPaymentStatusBadge } from './Badge.j
 export { Button } from './Button.jsx';
 export { Card } from './Card.jsx';
 export { Checkbox } from './Checkbox.jsx';
+export { DataTable } from './DataTable.jsx';
 export { Drawer } from './Drawer.jsx';
 export { Dropdown } from './Dropdown.jsx';
 export {
