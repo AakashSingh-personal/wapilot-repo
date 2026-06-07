@@ -4,11 +4,10 @@ import { MessageSquare, CalendarDays, Pencil, X, Check, Star } from 'lucide-reac
 import { api } from '../services/api.js';
 import { Card } from '../components/ui/Card.jsx';
 import { PageHeader } from '../components/ui/PageHeader.jsx';
-import { Table } from '../components/ui/Table.jsx';
+import { DataTable } from '../components/ui/DataTable.jsx';
 import { Button } from '../components/ui/Button.jsx';
 import { Input } from '../components/ui/Input.jsx';
 import { Avatar } from '../components/ui/Avatar.jsx';
-import { SearchBar } from '../components/ui/SearchBar.jsx';
 import { EmptyCustomers } from '../components/ui/EmptyState.jsx';
 
 /* ─── Inline edit form (no change to API calls) ─────────────────────────── */
@@ -102,17 +101,17 @@ export default function Customers() {
         <div className="flex items-center gap-3">
           <Avatar name={c.name || c.phone} size="sm" />
           <div className="min-w-0">
-            <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
-              {c.name || <span className="text-neutral-400 italic">No name</span>}
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
+              {c.name || <span className="text-neutral-400 italic font-normal">No name</span>}
             </p>
-            <p className="text-xs font-mono text-neutral-500 truncate">{c.phone}</p>
+            <p className="text-xs font-mono text-neutral-500 dark:text-neutral-400 truncate">{c.phone}</p>
           </div>
         </div>
       ),
     },
     {
       key: 'email',
-      label: 'Email',
+      label: 'Email / Edit',
       render: (c) =>
         editingId === c.id ? (
           <CustomerEditForm
@@ -129,11 +128,12 @@ export default function Customers() {
     {
       key: 'visits',
       label: 'Visits',
-      width: 100,
+      width: 110,
+      align: 'center',
       render: (c) =>
         c.appointmentStats?.totalVisits ? (
-          <div className="flex items-center gap-1.5 text-sm">
-            <span className="font-medium text-neutral-800 dark:text-neutral-200">
+          <div className="flex flex-col items-center gap-0.5">
+            <span className="text-sm font-bold text-neutral-800 dark:text-neutral-200 tabular-nums">
               {c.appointmentStats.totalVisits}
             </span>
             {c.appointmentStats.avgRating != null && (
@@ -144,15 +144,15 @@ export default function Customers() {
             )}
           </div>
         ) : (
-          <span className="text-neutral-300 dark:text-neutral-600">—</span>
+          <span className="text-neutral-300 dark:text-neutral-600 text-center block">—</span>
         ),
     },
     {
       key: 'createdAt',
-      label: 'Since',
-      width: 130,
+      label: 'Customer since',
+      width: 140,
       render: (c) => (
-        <span className="text-xs text-neutral-500">
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">
           {new Date(c.createdAt).toLocaleDateString(undefined, {
             month: 'short',
             day: 'numeric',
@@ -164,26 +164,30 @@ export default function Customers() {
     {
       key: 'actions',
       label: '',
-      width: 120,
+      width: 130,
       render: (c) =>
         editingId === c.id ? null : (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <Link
               to={`/conversations?customer=${encodeURIComponent(c.id)}`}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:text-brand-700 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 hover:bg-brand-100 dark:hover:bg-brand-900/50 transition-colors"
+              onClick={(e) => e.stopPropagation()}
             >
               <MessageSquare className="w-3.5 h-3.5" /> Chat
             </Link>
             <Link
               to={`/scheduling?tab=appointments&customerId=${encodeURIComponent(c.id)}`}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
+              className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+              title="View appointments"
+              onClick={(e) => e.stopPropagation()}
             >
               <CalendarDays className="w-3.5 h-3.5" />
             </Link>
             <button
               type="button"
-              onClick={() => setEditingId(c.id)}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors"
+              onClick={(e) => { e.stopPropagation(); setEditingId(c.id); }}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+              title="Edit customer"
             >
               <Pencil className="w-3.5 h-3.5" />
             </button>
@@ -206,22 +210,17 @@ export default function Customers() {
       )}
 
       <Card>
-        <Card.Header
-          title={`${filtered.length} customer${filtered.length !== 1 ? 's' : ''}`}
-          action={
-            <SearchBar
-              value={search}
-              onChange={setSearch}
-              placeholder="Search by name, phone…"
-              className="w-56"
-            />
-          }
-        />
-        <Table
+        <Card.Header title="All customers" />
+        <DataTable
           columns={columns}
           rows={filtered}
           loading={loading}
           skeletonRows={6}
+          searchValue={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search by name, phone, email…"
+          totalRows={filtered.length}
+          striped
           emptyState={
             search ? undefined : (
               <EmptyCustomers
