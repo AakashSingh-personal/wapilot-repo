@@ -1,21 +1,75 @@
 import { prisma } from '../lib/prisma.js';
 import {
   createRazorpayOrder,
+  fetchRazorpayOrder,
   razorpayPublicConfig,
   verifyRazorpayPaymentSignature,
 } from '../services/razorpay.service.js';
 
 function proAmount() {
   const raw = process.env.SUBSCRIPTION_PRO_AMOUNT || '999';
-  return raw;
+  return Number(raw);
+}
+
+function proAmountPaise() {
+  return Math.round(proAmount() * 100);
+}
+
+async function findReusableSubscriptionCheckout(businessId) {
+  const amt = proAmount();
+  const pending = await prisma.payment.findFirst({
+    where: {
+      businessId,
+      type: 'SUBSCRIPTION',
+      status: 'PENDING',
+      providerOrderId: { not: null },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!pending?.providerOrderId) return null;
+
+  try {
+    const order = await fetchRazorpayOrder(pending.providerOrderId);
+    if (order.status === 'created' && Number(order.amount) === proAmountPaise()) {
+      return { payment: pending, order, amount: amt };
+    }
+  } catch {
+    // Order missing or keys changed — create a fresh checkout below.
+  }
+  return null;
 }
 
 export async function subscriptionQr(req, res, next) {
   try {
-    const amt = Number(proAmount());
+    const businessId = req.user.businessId;
+    const keyId = razorpayPublicConfig().keyId;
+    if (!keyId) {
+      return res.status(503).json({ error: 'Razorpay is not configured on the server' });
+    }
+
+    const reusable = await findReusableSubscriptionCheckout(businessId);
+    if (reusable) {
+      return res.json({
+        paymentId: reusable.payment.id,
+        orderId: reusable.order.id,
+        amount: reusable.amount,
+        currency: reusable.order.currency || 'INR',
+        keyId,
+        plan: 'PRO',
+        reused: true,
+      });
+    }
+
+    const amt = proAmount();
+
+    await prisma.payment.updateMany({
+      where: { businessId, type: 'SUBSCRIPTION', status: 'PENDING' },
+      data: { status: 'FAILED' },
+    });
+
     const payment = await prisma.payment.create({
       data: {
-        businessId: req.user.businessId,
+        businessId,
         amount: amt.toFixed(2),
         type: 'SUBSCRIPTION',
         status: 'PENDING',
@@ -27,7 +81,7 @@ export async function subscriptionQr(req, res, next) {
       receipt: payment.id,
       notes: {
         paymentId: payment.id,
-        businessId: req.user.businessId,
+        businessId,
         plan: 'PRO',
       },
     });
@@ -40,8 +94,9 @@ export async function subscriptionQr(req, res, next) {
       orderId: order.id,
       amount: amt,
       currency: order.currency || 'INR',
-      keyId: razorpayPublicConfig().keyId,
+      keyId,
       plan: 'PRO',
+      reused: false,
     });
   } catch (e) {
     next(e);
@@ -75,6 +130,9 @@ export async function verifySubscriptionPayment(req, res, next) {
     if (!payment) return res.status(404).json({ error: 'Payment not found' });
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ error: 'Missing Razorpay payment verification fields' });
+    }
+    if (payment.providerOrderId && payment.providerOrderId !== razorpay_order_id) {
+      return res.status(400).json({ error: 'Order id does not match this payment record' });
     }
     const valid = verifyRazorpayPaymentSignature({
       orderId: razorpay_order_id,
@@ -135,7 +193,12 @@ export async function subscriptionStatus(req, res, next) {
         orderBy: { createdAt: 'desc' },
       }),
     ]);
-    res.json({ subscription: sub, pendingPayment: pending, latestPayment: latest });
+    res.json({
+      subscription: sub,
+      pendingPayment: pending,
+      latestPayment: latest,
+      razorpayKeyId: razorpayPublicConfig().keyId || null,
+    });
   } catch (e) {
     next(e);
   }

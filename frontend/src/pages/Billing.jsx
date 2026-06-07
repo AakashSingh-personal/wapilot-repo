@@ -50,7 +50,6 @@ export default function Billing() {
       const { data } = await api.get('/billing/pro-qr');
       const options = {
         key: data.keyId,
-        amount: Math.round(Number(data.amount) * 100),
         currency: data.currency || 'INR',
         name: 'WAPilot',
         description: `Upgrade to ${data.plan}`,
@@ -76,9 +75,16 @@ export default function Billing() {
         theme: { color: '#4f46e5' },
       };
       const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', async () => {
+      rzp.on('payment.failed', async (resp) => {
         await refresh();
-        setError('Payment failed or was cancelled.');
+        const desc = resp?.error?.description || resp?.error?.reason || '';
+        if (/token/i.test(desc)) {
+          setError(
+            'Saved card token is invalid or expired. Pay with a new card, or clear cookies for razorpay.com and retry.',
+          );
+        } else {
+          setError(desc || 'Payment failed or was cancelled.');
+        }
       });
       rzp.open();
     } catch (e) {

@@ -32,6 +32,12 @@ export async function createRazorpayOrder({ amountInInr, receipt, notes = {} }) 
   });
 }
 
+export async function fetchRazorpayOrder(orderId) {
+  if (!orderId) throw new Error('orderId required');
+  const client = getRazorpayClient();
+  return client.orders.fetch(orderId);
+}
+
 export async function createRazorpayPaymentLink({
   amountInInr,
   customer = {},
