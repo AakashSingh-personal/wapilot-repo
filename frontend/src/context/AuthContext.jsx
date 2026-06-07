@@ -5,18 +5,21 @@ import { startRealtime, stopRealtime } from '../realtime/socket.js';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem('wapilot_token'));
+  const [token, setToken] = useState(() => sessionStorage.getItem('wapilot_token'));
   const [user, setUser] = useState(null);
   const [business, setBusiness] = useState(null);
   const [bootstrapping, setBootstrapping] = useState(() =>
-    Boolean(localStorage.getItem('wapilot_token')),
+    Boolean(sessionStorage.getItem('wapilot_token')),
   );
+  // returnToken is kept in memory only (never written to storage) to limit XSS exposure.
+  const [returnToken, setReturnToken] = useState(null);
 
   const logout = useCallback(() => {
     setAuthToken(null);
     setToken(null);
     setUser(null);
     setBusiness(null);
+    setReturnToken(null);
   }, []);
 
   useEffect(() => {
@@ -32,15 +35,11 @@ export function AuthProvider({ children }) {
         if (cancelled) return;
         setUser(data.user);
         setBusiness(data.business);
-        localStorage.setItem('wapilot_user', JSON.stringify(data.user));
-        if (data.business) localStorage.setItem('wapilot_business', JSON.stringify(data.business));
       } catch {
         setAuthToken(null);
         setToken(null);
         setUser(null);
         setBusiness(null);
-        localStorage.removeItem('wapilot_user');
-        localStorage.removeItem('wapilot_business');
       } finally {
         if (!cancelled) setBootstrapping(false);
       }
@@ -69,8 +68,6 @@ export function AuthProvider({ children }) {
     setToken(t);
     setUser(u);
     setBusiness(b);
-    localStorage.setItem('wapilot_user', JSON.stringify(u));
-    if (b) localStorage.setItem('wapilot_business', JSON.stringify(b));
   }, []);
 
   const value = useMemo(
@@ -82,8 +79,10 @@ export function AuthProvider({ children }) {
       isAuthenticated: Boolean(token && user),
       loginState,
       logout,
+      returnToken,
+      setReturnToken,
     }),
-    [token, user, business, bootstrapping, loginState, logout],
+    [token, user, business, bootstrapping, loginState, logout, returnToken],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

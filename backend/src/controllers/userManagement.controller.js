@@ -1,13 +1,24 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
+import { log } from '../utils/logger.js';
+import { isEmailConfigured, sendEmail } from '../scheduling/notificationDelivery.service.js';
 
+/** Cryptographically secure random password using rejection sampling to avoid modulo bias. */
 function randomPassword(len = 14) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
-  let out = '';
-  for (let i = 0; i < len; i += 1) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  const limit = Math.floor(256 / alphabet.length) * alphabet.length;
+  const out = [];
+  while (out.length < len) {
+    const buf = crypto.randomBytes(len * 2);
+    for (const byte of buf) {
+      if (byte < limit) {
+        out.push(alphabet[byte % alphabet.length]);
+        if (out.length === len) break;
+      }
+    }
   }
-  return out;
+  return out.join('');
 }
 
 export async function listUsers(req, res, next) {
@@ -97,16 +108,32 @@ export async function createUser(req, res, next) {
       },
     });
 
-    res.status(201).json({
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        businessId: user.businessId,
-        businessName: business.name,
-      },
-      tempPassword,
-    });
+    const userPayload = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      businessId: user.businessId,
+      businessName: business.name,
+    };
+
+    if (isEmailConfigured()) {
+      try {
+        await sendEmail({
+          to: email,
+          subject: 'Your WAPilot account has been created',
+          text: `Hello,\n\nAn account has been created for you on WAPilot.\n\nEmail: ${email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
+        });
+        return res.status(201).json({ user: userPayload, tempPasswordSentViaEmail: true });
+      } catch (emailErr) {
+        log('warn', 'create_user_email_failed', { email, message: emailErr.message });
+        // Fall through to include password in response if email fails
+      }
+    }
+
+    // SMTP not configured or email failed — include password in response.
+    // Treat this response as sensitive; do not log it.
+    log('warn', 'create_user_temp_password_in_response', { email, role });
+    res.status(201).json({ user: userPayload, tempPassword });
   } catch (e) {
     next(e);
   }
@@ -140,12 +167,28 @@ export async function resetUserPassword(req, res, next) {
       where: { id: target.id },
       data: { password: hash },
     });
-    return res.json({
+
+    const resetPayload = {
       ok: true,
       user: { id: target.id, email: target.email, role: target.role },
-      tempPassword,
       by: isChiefAdmin ? 'CHIEF_ADMIN' : 'OWNER',
-    });
+    };
+
+    if (isEmailConfigured()) {
+      try {
+        await sendEmail({
+          to: target.email,
+          subject: 'Your WAPilot password has been reset',
+          text: `Hello,\n\nYour password has been reset.\n\nEmail: ${target.email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
+        });
+        return res.json({ ...resetPayload, tempPasswordSentViaEmail: true });
+      } catch (emailErr) {
+        log('warn', 'reset_password_email_failed', { email: target.email, message: emailErr.message });
+      }
+    }
+
+    log('warn', 'reset_password_temp_in_response', { email: target.email, role: target.role });
+    return res.json({ ...resetPayload, tempPassword });
   } catch (e) {
     next(e);
   }

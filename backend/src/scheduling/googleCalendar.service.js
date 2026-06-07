@@ -320,10 +320,12 @@ export async function registerGoogleCalendarWatch(connectionId) {
   const { conn, accessToken } = await getValidAccessToken(connectionId);
   const calendarId = conn.calendarId || 'primary';
   const channelId = crypto.randomUUID();
+  // Generate a secret token that Google will echo back in X-Goog-Channel-Token on every push.
+  const channelToken = crypto.randomBytes(32).toString('hex');
 
   const res = await axios.post(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/watch`,
-    { id: channelId, type: 'web_hook', address },
+    { id: channelId, type: 'web_hook', address, token: channelToken },
     { headers: { Authorization: `Bearer ${accessToken}` } },
   );
 
@@ -333,6 +335,7 @@ export async function registerGoogleCalendarWatch(connectionId) {
       webhookChannelId: res.data?.id || channelId,
       webhookResourceId: res.data?.resourceId || null,
       webhookExpiresAt: res.data?.expiration ? new Date(Number(res.data.expiration)) : null,
+      webhookToken: channelToken,
     },
   });
 
@@ -341,27 +344,33 @@ export async function registerGoogleCalendarWatch(connectionId) {
 
 export async function handleGoogleCalendarWebhook(headers) {
   const channelId = headers['x-goog-channel-id'] || headers['X-Goog-Channel-Id'];
-  const resourceId = headers['x-goog-resource-id'] || headers['X-Goog-Resource-Id'];
-  if (!channelId && !resourceId) return { ok: false };
+  const incomingToken = headers['x-goog-channel-token'] || headers['X-Goog-Channel-Token'];
 
-  const where = { isActive: true };
-  if (channelId) {
-    const conn = await prisma.calendarConnection.findFirst({
-      where: { ...where, webhookChannelId: String(channelId) },
-    });
-    if (conn) {
-      const result = await pullGoogleCalendarBlocks(conn.id);
-      return { ok: true, synced: result.synced };
+  if (!channelId) return { ok: false };
+
+  const conn = await prisma.calendarConnection.findFirst({
+    where: { isActive: true, webhookChannelId: String(channelId) },
+  });
+
+  if (!conn) return { ok: false, reason: 'unknown_channel' };
+
+  // Verify the token when one is stored — rejects unauthenticated trigger attempts.
+  if (conn.webhookToken) {
+    if (!incomingToken) {
+      log('warn', 'google_calendar_webhook_missing_token', { connectionId: conn.id });
+      return { ok: false, reason: 'missing_token' };
+    }
+    const expected = Buffer.from(conn.webhookToken);
+    const provided = Buffer.from(String(incomingToken));
+    const tokenValid =
+      expected.length === provided.length &&
+      crypto.timingSafeEqual(expected, provided);
+    if (!tokenValid) {
+      log('warn', 'google_calendar_webhook_invalid_token', { connectionId: conn.id });
+      return { ok: false, reason: 'invalid_token' };
     }
   }
-  if (resourceId) {
-    const conn = await prisma.calendarConnection.findFirst({
-      where: { ...where, webhookResourceId: String(resourceId) },
-    });
-    if (conn) {
-      const result = await pullGoogleCalendarBlocks(conn.id);
-      return { ok: true, synced: result.synced };
-    }
-  }
-  return { ok: false, reason: 'unknown_channel' };
+
+  const result = await pullGoogleCalendarBlocks(conn.id);
+  return { ok: true, synced: result.synced };
 }

@@ -390,7 +390,9 @@ export async function runAutoReplyForInboundText({ business, customer, phone, te
       history,
       services: knowledge.services,
     });
-    const amountInInr = requestedAmount || selectedServiceAmount || 100;
+    const MAX_BOT_PAYMENT_AMOUNT = Number(process.env.MAX_PAYMENT_LINK_AMOUNT || 100000);
+    const rawAmount = requestedAmount || selectedServiceAmount || 100;
+    const amountInInr = Math.min(rawAmount, MAX_BOT_PAYMENT_AMOUNT);
     try {
       const cp = await prisma.customerPayment.create({
         data: {

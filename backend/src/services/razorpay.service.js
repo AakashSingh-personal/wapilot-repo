@@ -103,12 +103,18 @@ export function verifyRazorpayPaymentSignature({ orderId, paymentId, signature }
   if (!secret) throw new Error('Missing RAZORPAY_KEY_SECRET');
   const body = `${orderId}|${paymentId}`;
   const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
-  return expected === signature;
+  const sig = String(signature || '');
+  // Constant-time comparison prevents timing oracle attacks on the HMAC value.
+  if (expected.length !== sig.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
 }
 
 export function verifyRazorpayWebhookSignature({ rawBody, signature }) {
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
   if (!secret) throw new Error('Missing RAZORPAY_WEBHOOK_SECRET');
   const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  return expected === signature;
+  const sig = String(signature || '');
+  // Constant-time comparison prevents timing oracle attacks on the HMAC value.
+  if (expected.length !== sig.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
 }

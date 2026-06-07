@@ -7,9 +7,15 @@ import { getSchedulingSettings } from './schedulingSettings.service.js';
 import { buildManageAppointmentUrl } from './appointmentLinks.service.js';
 import { joinWaitlist } from './waitlist.service.js';
 import { findOrCreateCustomer } from './customer.service.js';
+import { withBookingIdempotency } from './idempotency.service.js';
+
+const PUBLIC_BOOKING_TOKEN_DAYS = Math.max(
+  1,
+  Math.min(365, Number(process.env.PUBLIC_BOOKING_TOKEN_DAYS || 30)),
+);
 
 export function signPublicBookingToken(businessId) {
-  return signToken({ type: 'public_booking', businessId }, '365d');
+  return signToken({ type: 'public_booking', businessId }, `${PUBLIC_BOOKING_TOKEN_DAYS}d`);
 }
 
 export function buildPublicBookingUrl(businessId) {
@@ -100,25 +106,36 @@ export async function getPublicBookingSlots(businessId, query) {
 
 export async function createPublicBooking(businessId, body = {}) {
   await assertPublicBookingEnabled(businessId);
-  const { phone, name, email, serviceId, locationId, staffId, startAt, notes } = body;
+  const { phone, name, email, serviceId, locationId, staffId, startAt, notes, idempotencyKey } = body;
   if (!phone || !serviceId || !locationId || !startAt) {
     const err = new Error('phone, serviceId, locationId, startAt required');
     err.statusCode = 400;
     throw err;
   }
 
+  // Derive an idempotency key from the booking fingerprint when none is supplied,
+  // so network retries don't create duplicate appointments.
+  const normalizedPhone = String(phone).trim().replace(/[^\d+]/g, '');
+  const derivedKey = idempotencyKey
+    || `pb:${businessId}:${normalizedPhone}:${serviceId}:${locationId}:${String(startAt)}`;
+
   const customer = await findOrCreateCustomer({ businessId, phone, name, email });
-  const { appointment, paymentIntent } = await createAppointment({
+
+  const { appointment, paymentIntent } = await withBookingIdempotency({
     businessId,
-    customerId: customer.id,
-    serviceId,
-    locationId,
-    staffId: staffId || undefined,
-    startAt,
-    notes,
-    source: 'PUBLIC_BOOKING',
-    status: 'CONFIRMED',
-    collectAdvance: Boolean(body.collectAdvance),
+    idempotencyKey: derivedKey,
+    run: () => createAppointment({
+      businessId,
+      customerId: customer.id,
+      serviceId,
+      locationId,
+      staffId: staffId || undefined,
+      startAt,
+      notes,
+      source: 'PUBLIC_BOOKING',
+      status: 'CONFIRMED',
+      collectAdvance: Boolean(body.collectAdvance),
+    }),
   });
 
   return {

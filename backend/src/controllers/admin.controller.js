@@ -1,19 +1,44 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
 import { mergeCatalog } from '../utils/businessCatalog.js';
 import { signToken, verifyToken } from '../utils/jwt.js';
+import { log } from '../utils/logger.js';
+import { isEmailConfigured, sendEmail } from '../scheduling/notificationDelivery.service.js';
 
+/** Cryptographically secure random password using rejection sampling to avoid modulo bias. */
 function randomPassword(len = 14) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
-  let out = '';
-  for (let i = 0; i < len; i += 1) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  // Largest multiple of alphabet.length that fits in a byte — values above this are discarded.
+  const limit = Math.floor(256 / alphabet.length) * alphabet.length;
+  const out = [];
+  while (out.length < len) {
+    const buf = crypto.randomBytes(len * 2);
+    for (const byte of buf) {
+      if (byte < limit) {
+        out.push(alphabet[byte % alphabet.length]);
+        if (out.length === len) break;
+      }
+    }
   }
-  return out;
+  return out.join('');
 }
 
 export async function ensureChiefAdmin(req, res, next) {
   try {
+    const setupToken = process.env.CHIEF_ADMIN_SETUP_TOKEN;
+    if (!setupToken) {
+      return res.status(403).json({ error: 'Bootstrap endpoint is disabled — set CHIEF_ADMIN_SETUP_TOKEN to enable' });
+    }
+    const provided = String(req.body?.setupToken || req.headers['x-setup-token'] || '');
+    // Use HMAC-based constant-time comparison so timing is equal regardless of input length.
+    const key = crypto.randomBytes(32);
+    const hmacProvided = crypto.createHmac('sha256', key).update(provided).digest();
+    const hmacExpected = crypto.createHmac('sha256', key).update(setupToken).digest();
+    if (!crypto.timingSafeEqual(hmacProvided, hmacExpected)) {
+      return res.status(403).json({ error: 'Invalid setup token' });
+    }
+
     const email = String(process.env.CHIEF_ADMIN_EMAIL || '').trim().toLowerCase();
     const password = String(process.env.CHIEF_ADMIN_PASSWORD || '').trim();
     if (!email || !password) {
@@ -105,7 +130,6 @@ export async function onboardClient(req, res, next) {
       return { business, user };
     });
 
-    // Optionally return an immediate token for the created owner.
     const token = signToken({
       userId: result.user.id,
       businessId: result.business.id,
@@ -113,12 +137,27 @@ export async function onboardClient(req, res, next) {
       email: result.user.email,
     });
 
-    res.status(201).json({
+    const onboardPayload = {
       business: { id: result.business.id, name: result.business.name },
       owner: { id: result.user.id, email: result.user.email, role: result.user.role },
-      tempPassword,
       token,
-    });
+    };
+
+    if (isEmailConfigured()) {
+      try {
+        await sendEmail({
+          to: email,
+          subject: 'Welcome to WAPilot — your account is ready',
+          text: `Hello${ownerName ? ' ' + ownerName : ''},\n\nYour WAPilot account has been created.\n\nEmail: ${email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
+        });
+        return res.status(201).json({ ...onboardPayload, tempPasswordSentViaEmail: true });
+      } catch (emailErr) {
+        log('warn', 'onboard_email_failed', { email, message: emailErr.message });
+      }
+    }
+
+    log('warn', 'onboard_temp_password_in_response', { email });
+    res.status(201).json({ ...onboardPayload, tempPassword });
   } catch (e) {
     next(e);
   }
@@ -175,7 +214,7 @@ export async function impersonateClient(req, res, next) {
         email: req.user.email,
         type: 'chief_return',
       },
-      '12h',
+      '15m', // Short TTL — limits replay window if token is stolen from storage or logs.
     );
 
     res.json({
@@ -248,10 +287,23 @@ export async function createChiefAdmin(req, res, next) {
       },
     });
 
-    res.status(201).json({
-      user: { id: user.id, email: user.email, role: user.role, businessId: user.businessId },
-      tempPassword,
-    });
+    const chiefPayload = { user: { id: user.id, email: user.email, role: user.role, businessId: user.businessId } };
+
+    if (isEmailConfigured()) {
+      try {
+        await sendEmail({
+          to: email,
+          subject: 'Your WAPilot ChiefAdmin account',
+          text: `Hello,\n\nA ChiefAdmin account has been created for you.\n\nEmail: ${email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
+        });
+        return res.status(201).json({ ...chiefPayload, tempPasswordSentViaEmail: true });
+      } catch (emailErr) {
+        log('warn', 'create_chief_admin_email_failed', { email, message: emailErr.message });
+      }
+    }
+
+    log('warn', 'create_chief_admin_temp_in_response', { email });
+    res.status(201).json({ ...chiefPayload, tempPassword });
   } catch (e) {
     next(e);
   }

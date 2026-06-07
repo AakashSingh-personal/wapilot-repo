@@ -23,12 +23,28 @@ import {
 import { getCachedMetaTemplates, setCachedMetaTemplates } from '../utils/templateListCache.js';
 
 const MESSAGE_COST_INR = Number(process.env.COMMUNICATION_COST_PER_MESSAGE || 2);
+const MAX_WALLET_TOPUP_INR = Number(process.env.MAX_WALLET_TOPUP_INR || 50_000);
+const MAX_CSV_BYTES = Number(process.env.MAX_CONTACT_CSV_BYTES || 512 * 1024); // 512 KB
+const MAX_BULK_RECIPIENTS = Number(process.env.MAX_BULK_RECIPIENTS || 500);
+
+/** Integer-cent arithmetic avoids floating-point drift (e.g. 0.1 + 0.2 !== 0.3). */
+function addMoney(a, b) {
+  return (Math.round(Number(a) * 100 + Number(b) * 100) / 100).toFixed(2);
+}
+function subtractMoney(a, b) {
+  return (Math.round(Number(a) * 100 - Number(b) * 100) / 100).toFixed(2);
+}
 
 function normalizePhone(raw) {
   if (!raw) return '';
   const only = String(raw).trim().replace(/[^\d+]/g, '');
   if (only.startsWith('+')) return only;
   return `+${only}`;
+}
+
+function isValidPhone(normalized) {
+  // E.164-ish: + followed by 7–15 digits (ITU-T E.164 max is 15)
+  return /^\+\d{7,15}$/.test(normalized);
 }
 
 function toMetaTemplateName(name, businessId) {
@@ -192,8 +208,7 @@ async function getOrCreateWallet(tx, businessId) {
 async function refundCommunicationCharge({ businessId, campaignId, contactId, phone }) {
   await prisma.$transaction(async (tx) => {
     const wallet = await getOrCreateWallet(tx, businessId);
-    const balance = Number(wallet.balance);
-    const nextBalance = (balance + MESSAGE_COST_INR).toFixed(2);
+    const nextBalance = addMoney(wallet.balance, MESSAGE_COST_INR);
     await tx.wallet.update({
       where: { id: wallet.id },
       data: { balance: nextBalance },
@@ -259,6 +274,11 @@ export async function addMoneyToWallet(req, res, next) {
     const amountNum = Number(req.body?.amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       return res.status(400).json({ error: 'Valid amount is required' });
+    }
+    if (amountNum > MAX_WALLET_TOPUP_INR) {
+      return res.status(400).json({
+        error: `Top-up cannot exceed ₹${MAX_WALLET_TOPUP_INR.toLocaleString('en-IN')} per transaction`,
+      });
     }
     const amount = amountNum.toFixed(2);
     const payment = await prisma.payment.create({
@@ -336,7 +356,7 @@ export async function verifyWalletTopup(req, res, next) {
         },
       });
       const wallet = await getOrCreateWallet(tx, req.user.businessId);
-      const nextBalance = (Number(wallet.balance) + Number(payment.amount)).toFixed(2);
+      const nextBalance = addMoney(wallet.balance, payment.amount);
       await tx.wallet.update({
         where: { id: wallet.id },
         data: { balance: nextBalance },
@@ -507,6 +527,11 @@ export async function contactBook(req, res, next) {
 export async function uploadContacts(req, res, next) {
   try {
     const { contacts = [], csvText = '' } = req.body || {};
+    if (typeof csvText === 'string' && Buffer.byteLength(csvText) > MAX_CSV_BYTES) {
+      return res.status(413).json({
+        error: `csvText exceeds the maximum allowed size of ${Math.round(MAX_CSV_BYTES / 1024)} KB`,
+      });
+    }
     const lines = typeof csvText === 'string' ? csvText.split('\n') : [];
     const fromCsv = lines
       .map((line) => line.trim())
@@ -948,6 +973,12 @@ export async function sendTemplateCommunication(req, res, next) {
     const contactIdSet = [...new Set([contactId, ...contactIds].filter(Boolean))];
     const customerIdSet = [...new Set([...(customerIds || [])].filter(Boolean))];
 
+    if (contactIdSet.length + customerIdSet.length > MAX_BULK_RECIPIENTS) {
+      return res.status(400).json({
+        error: `Cannot send to more than ${MAX_BULK_RECIPIENTS} recipients in a single request`,
+      });
+    }
+
     const [contacts, customers] = await Promise.all([
       contactIdSet.length
         ? prisma.contact.findMany({
@@ -976,10 +1007,10 @@ export async function sendTemplateCommunication(req, res, next) {
         walletContactId: null,
         customerId: c.id,
       })),
-    ];
+    ].filter((t) => isValidPhone(t.phone));
 
     if (!targets.length) {
-      return res.status(400).json({ error: 'Provide at least one contactId or customerId' });
+      return res.status(400).json({ error: 'Provide at least one contactId or customerId with a valid phone number (+country code, 7–15 digits)' });
     }
 
     const business = await prisma.business.findUnique({ where: { id: req.user.businessId } });
@@ -1016,20 +1047,28 @@ export async function sendTemplateCommunication(req, res, next) {
     const blocked = [];
     const results = [];
 
-    for (const target of targets) {
-      const walletBefore = await prisma.wallet.findUnique({
-        where: { businessId: req.user.businessId },
-      });
-      if (Number(walletBefore?.balance || 0) < MESSAGE_COST_INR) {
-        blocked.push({
-          contactId: target.walletContactId,
-          customerId: target.customerId,
-          phone: target.phone,
-          reason: 'INSUFFICIENT_BALANCE',
-        });
-        failedCount += 1;
-        continue;
+    // Single pre-flight check — avoid N+1 wallet queries inside the loop.
+    // The transaction inside the loop re-checks balance atomically before debiting.
+    const walletPre = await prisma.wallet.findUnique({ where: { businessId: req.user.businessId } });
+    if (Number(walletPre?.balance || 0) < MESSAGE_COST_INR) {
+      for (const target of targets) {
+        blocked.push({ contactId: target.walletContactId, customerId: target.customerId, phone: target.phone, reason: 'INSUFFICIENT_BALANCE' });
       }
+      const updatedCampaign = await prisma.communicationCampaign.update({
+        where: { id: campaign.id },
+        data: { status: 'FAILED', sentCount: 0, failedCount: targets.length, totalCharged: '0.00' },
+      });
+      const wallet = await prisma.wallet.findUnique({ where: { businessId: req.user.businessId } });
+      return res.status(422).json({
+        campaign: { id: updatedCampaign.id, status: 'FAILED', totalContacts: targets.length, sentCount: 0, failedCount: targets.length, totalCharged: 0, messageCost: MESSAGE_COST_INR },
+        sentCount: 0, failedCount: targets.length, blocked, results: [],
+        error: 'Insufficient wallet balance',
+        walletBalance: wallet ? Number(wallet.balance) : 0,
+        messageCost: MESSAGE_COST_INR,
+      });
+    }
+
+    for (const target of targets) {
 
       const resolveOpts = {
         businessId: req.user.businessId,
@@ -1065,9 +1104,8 @@ export async function sendTemplateCommunication(req, res, next) {
         // Debit before calling Meta so we never report "failed" after WhatsApp already accepted the message.
         const debited = await prisma.$transaction(async (tx) => {
           const wallet = await getOrCreateWallet(tx, req.user.businessId);
-          const balance = Number(wallet.balance);
-          if (balance < MESSAGE_COST_INR) return false;
-          const nextBalance = (balance - MESSAGE_COST_INR).toFixed(2);
+          if (Number(wallet.balance) < MESSAGE_COST_INR) return false;
+          const nextBalance = subtractMoney(wallet.balance, MESSAGE_COST_INR);
           await tx.wallet.update({
             where: { id: wallet.id },
             data: { balance: nextBalance },

@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 export default function ChiefAdmin() {
   const navigate = useNavigate();
-  const { loginState } = useAuth();
+  const { loginState, setReturnToken } = useAuth();
   const [tab, setTab] = useState('CLIENTS');
   const [businessName, setBusinessName] = useState('');
   const [ownerName, setOwnerName] = useState('');
@@ -39,7 +39,8 @@ export default function ChiefAdmin() {
     try {
       const { data } = await api.post('/admin/impersonate', { businessId });
       if (data?.returnToken) {
-        sessionStorage.setItem('wapilot_chiefadmin_return_token', data.returnToken);
+        // Store only in React state (memory) — never persisted to storage.
+        setReturnToken(data.returnToken);
       }
       loginState(data);
       navigate('/dashboard');

@@ -505,11 +505,13 @@ export async function listPayments(req, res, next) {
       prisma.payment.findMany({
         where: { businessId },
         orderBy: { createdAt: 'desc' },
+        take: 500,
       }),
       prisma.customerPayment.findMany({
         where: { businessId },
         include: { customer: true },
         orderBy: { createdAt: 'desc' },
+        take: 500,
       }),
     ]);
     res.json({ subscriptionPayments: payments, customerPayments });

@@ -9,7 +9,22 @@ import { shouldStartWorkersInProcess } from './scheduling/queue.service.js';
 
 const port = Number(process.env.PORT || 3000);
 
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET'];
+
+function validateEnv() {
+  const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
+  if (missing.length) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+  if (!process.env.WHATSAPP_APP_SECRET) {
+    log('warn', 'env_missing_whatsapp_app_secret', {
+      message: 'WHATSAPP_APP_SECRET not set — incoming WhatsApp webhook signatures will not be verified',
+    });
+  }
+}
+
 async function main() {
+  validateEnv();
   await initRealtimeRedis(process.env.REDIS_URL);
 
   const app = createApp();

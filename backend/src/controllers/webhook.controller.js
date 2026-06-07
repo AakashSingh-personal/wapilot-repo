@@ -1,4 +1,9 @@
+import crypto from 'crypto';
 import { log } from '../utils/logger.js';
+
+function addMoney(a, b) {
+  return (Math.round(Number(a) * 100 + Number(b) * 100) / 100).toFixed(2);
+}
 import * as webhookService from '../services/webhook.service.js';
 import { prisma } from '../lib/prisma.js';
 import { publishInboxLive } from '../realtime/publishInbox.js';
@@ -14,15 +19,39 @@ export function verifyWebhook(req, res) {
   const challenge = req.query['hub.challenge'];
   const verifyToken = process.env.VERIFY_TOKEN;
 
-  if (mode === 'subscribe' && token && verifyToken && token === verifyToken) {
-    log('info', 'webhook_verified');
-    return res.status(200).send(challenge);
+  // Constant-time comparison prevents timing oracle on the verify token.
+  if (mode === 'subscribe' && token && verifyToken) {
+    const key = crypto.randomBytes(32);
+    const hmacToken = crypto.createHmac('sha256', key).update(token).digest();
+    const hmacExpected = crypto.createHmac('sha256', key).update(verifyToken).digest();
+    if (crypto.timingSafeEqual(hmacToken, hmacExpected)) {
+      log('info', 'webhook_verified');
+      return res.status(200).send(challenge);
+    }
   }
   log('warn', 'webhook_verify_failed');
   return res.sendStatus(403);
 }
 
 export async function receiveWebhook(req, res) {
+  const appSecret = process.env.WHATSAPP_APP_SECRET;
+  if (appSecret) {
+    const sig = req.headers['x-hub-signature-256'];
+    if (!sig) {
+      log('warn', 'whatsapp_webhook_missing_signature');
+      return res.sendStatus(403);
+    }
+    const expected = 'sha256=' + crypto.createHmac('sha256', appSecret).update(req.rawBody || '').digest('hex');
+    // timingSafeEqual throws if buffers have different byte lengths — check first.
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    const valid = sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
+    if (!valid) {
+      log('warn', 'whatsapp_webhook_invalid_signature');
+      return res.sendStatus(403);
+    }
+  }
+
   res.sendStatus(200);
 
   try {
@@ -192,10 +221,16 @@ export async function receiveWebhook(req, res) {
 export async function receiveRazorpayWebhook(req, res) {
   try {
     const signature = req.headers['x-razorpay-signature'];
-    const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+    if (!signature) {
+      return res.status(400).json({ error: 'Missing x-razorpay-signature header' });
+    }
+    if (!req.rawBody) {
+      log('error', 'razorpay_webhook_missing_rawbody');
+      return res.status(400).json({ error: 'rawBody not captured — check middleware ordering' });
+    }
     const valid = verifyRazorpayWebhookSignature({
-      rawBody: raw,
-      signature: String(signature || ''),
+      rawBody: req.rawBody,
+      signature: String(signature),
     });
     if (!valid) return res.status(400).json({ error: 'Invalid webhook signature' });
 
@@ -274,7 +309,7 @@ export async function receiveRazorpayWebhook(req, res) {
             balance: '0',
           },
         });
-        const nextBalance = (Number(wallet.balance) + Number(customerPayment.amount)).toFixed(2);
+        const nextBalance = addMoney(wallet.balance, customerPayment.amount);
         await tx.wallet.update({
           where: { id: wallet.id },
           data: { balance: nextBalance },
@@ -343,7 +378,7 @@ export async function receiveRazorpayWebhook(req, res) {
                 balance: '0',
               },
             });
-            const nextBalance = (Number(wallet.balance) + Number(payment.amount)).toFixed(2);
+            const nextBalance = addMoney(wallet.balance, payment.amount);
             await tx.wallet.update({
               where: { id: wallet.id },
               data: { balance: nextBalance },

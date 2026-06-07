@@ -17,6 +17,42 @@ function getClient() {
   return cached;
 }
 
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+  'video/mp4', 'video/quicktime',
+  'application/pdf',
+  'audio/mpeg', 'audio/ogg', 'audio/wav',
+]);
+
+/** Magic-byte signatures: [mimeType, byteOffset, expectedBytes] */
+const MAGIC_BYTES = [
+  ['image/jpeg',      0, [0xFF, 0xD8, 0xFF]],
+  ['image/png',       0, [0x89, 0x50, 0x4E, 0x47]],
+  ['image/gif',       0, [0x47, 0x49, 0x46]],
+  ['image/webp',      8, [0x57, 0x45, 0x42, 0x50]],
+  ['application/pdf', 0, [0x25, 0x50, 0x44, 0x46]],
+  ['video/mp4',       4, [0x66, 0x74, 0x79, 0x70]], // ftyp box
+];
+
+function validateMimeVsMagicBytes(bytes, declaredMime) {
+  if (!declaredMime || !ALLOWED_MIME_TYPES.has(declaredMime)) {
+    throw Object.assign(
+      new Error(`Unsupported file type: ${declaredMime}. Allowed: ${[...ALLOWED_MIME_TYPES].join(', ')}`),
+      { statusCode: 415 },
+    );
+  }
+  const entry = MAGIC_BYTES.find(([mime]) => mime === declaredMime);
+  if (!entry) return; // no magic check available for this type — allowed
+  const [, offset, expected] = entry;
+  const matches = expected.every((b, i) => bytes[offset + i] === b);
+  if (!matches) {
+    throw Object.assign(
+      new Error(`File content does not match declared MIME type (${declaredMime})`),
+      { statusCode: 415 },
+    );
+  }
+}
+
 function extensionFromMime(mimeType) {
   if (!mimeType) return 'bin';
   if (mimeType === 'image/jpeg') return 'jpg';
@@ -62,6 +98,10 @@ export async function uploadBase64ToSupabase({
   const clean = String(base64Data || '').replace(/^data:[^;]+;base64,/, '').trim();
   if (!clean) throw new Error('base64Data is required');
   const bytes = Buffer.from(clean, 'base64');
+
+  // Reject disallowed types and files whose content doesn't match claimed MIME.
+  validateMimeVsMagicBytes(bytes, mimeType);
+
   const ext = extensionFromMime(mimeType);
   const baseName = fileName || `upload-${Date.now()}.${ext}`;
   const withExt = hasExtension(baseName) ? baseName : `${baseName}.${ext}`;

@@ -27,3 +27,21 @@ export async function login(req, res, next) {
     next(e);
   }
 }
+
+export async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+    }
+    const result = await authService.changePassword({
+      userId: req.user.userId,
+      currentPassword,
+      newPassword,
+    });
+    res.json(result);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.publicMessage || e.message });
+    next(e);
+  }
+}

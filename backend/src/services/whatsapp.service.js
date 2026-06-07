@@ -246,9 +246,25 @@ export async function fetchWhatsAppMediaById(mediaId) {
     throw new Error('WhatsApp media url missing');
   }
 
+  const MAX_MEDIA_BYTES = Number(process.env.WHATSAPP_MEDIA_MAX_BYTES || 25 * 1024 * 1024); // 25 MB
+
+  // Check Content-Length before downloading the full file.
+  const headRes = await axios.head(downloadUrl, {
+    headers: { Authorization: `Bearer ${t}` },
+  }).catch(() => null); // HEAD may not be supported — fall through
+  const contentLength = headRes ? Number(headRes.headers['content-length'] || 0) : 0;
+  if (contentLength > MAX_MEDIA_BYTES) {
+    throw Object.assign(
+      new Error(`Media file too large (${(contentLength / 1024 / 1024).toFixed(1)} MB > ${MAX_MEDIA_BYTES / 1024 / 1024} MB limit)`),
+      { statusCode: 413 },
+    );
+  }
+
   const fileRes = await axios.get(downloadUrl, {
     headers: { Authorization: `Bearer ${t}` },
     responseType: 'arraybuffer',
+    maxContentLength: MAX_MEDIA_BYTES,
+    maxBodyLength: MAX_MEDIA_BYTES,
   });
 
   return {

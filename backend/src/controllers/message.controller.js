@@ -12,6 +12,9 @@ export async function sendMessage(req, res, next) {
     if (!customerId || (!content && !imageUrl)) {
       return res.status(400).json({ error: 'customerId and either content or imageUrl required' });
     }
+    if (imageUrl && !/^https:\/\//i.test(String(imageUrl))) {
+      return res.status(400).json({ error: 'imageUrl must be an HTTPS URL' });
+    }
 
     const [customer, business] = await Promise.all([
       prisma.customer.findFirst({

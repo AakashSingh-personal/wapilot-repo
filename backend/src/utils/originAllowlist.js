@@ -14,6 +14,8 @@ export function isAllowedOrigin(origin) {
   if (!origin) return true;
   if (fallbackOrigins.has(origin)) return true;
   if (configuredOrigins().includes(origin)) return true;
-  if (/^https:\/\/[a-z0-9-]+\.pages\.dev$/i.test(origin)) return true;
+  // The former *.pages.dev wildcard has been removed — it allowed any Cloudflare Pages
+  // project to make credentialed cross-origin requests.  Add your specific deployment
+  // domain to CORS_ORIGIN instead.
   return false;
 }

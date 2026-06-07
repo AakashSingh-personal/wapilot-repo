@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { getRedisClient } from '../realtime/redisBridge.js';
 import { log } from '../utils/logger.js';
 
@@ -18,7 +19,7 @@ export async function acquireSlotLock({ businessId, staffId, startAt, ttlSec = D
   if (!redis) return `local-${Date.now()}`;
 
   const key = lockKey({ businessId, staffId, startAt });
-  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const token = crypto.randomBytes(16).toString('hex');
   try {
     const ok = await redis.set(key, token, 'EX', ttlSec, 'NX');
     return ok === 'OK' ? token : null;

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { publish } from '../realtime/publisher.js';
 import { EventType } from '../realtime/events.js';
@@ -14,9 +15,10 @@ import { refreshCustomerAppointmentStats } from './customerStats.service.js';
 
 const ACTIVE_APPT = ['PENDING', 'CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS'];
 
-function nextAppointmentNumber(businessId) {
+function nextAppointmentNumber() {
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const suffix = String(Math.floor(Math.random() * 9000) + 1000);
+  // 3 random bytes → 6 hex chars → 16M unique values per day, negligible collision probability.
+  const suffix = crypto.randomBytes(3).toString('hex').toUpperCase();
   return `APT-${day}-${suffix}`;
 }
 
@@ -147,7 +149,7 @@ export async function createAppointment({
     const appt = await tx.appointment.create({
       data: {
         businessId,
-        appointmentNumber: nextAppointmentNumber(businessId),
+        appointmentNumber: nextAppointmentNumber(),
         customerId,
         staffId,
         serviceId,
@@ -254,8 +256,9 @@ export async function updateAppointmentStatus({
   if (toStatus === 'COMPLETED') data.completedAt = new Date();
 
   const updated = await prisma.$transaction(async (tx) => {
+    // Optimistic lock on version — prevents concurrent updates from conflicting silently.
     const row = await tx.appointment.update({
-      where: { id: appointmentId },
+      where: { id: appointmentId, version: appt.version },
       data,
       include: {
         customer: { select: { id: true, name: true, phone: true, email: true } },

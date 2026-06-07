@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma.js';
 import { signToken } from '../utils/jwt.js';
 
+const MIN_PASSWORD_LEN = 8;
+
 export async function register({ email, password, businessName }) {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -70,9 +72,15 @@ export async function register({ email, password, businessName }) {
   };
 }
 
+// Pre-computed bcrypt hash used purely to equalise login timing when the user is not found,
+// preventing username enumeration via response-time differences.
+const DUMMY_HASH = '$2b$12$eImiTAVSMoBDKhTar4GzouNE0bOKy6XiXV.hM93b.z0XcH5RrBWbq';
+
 export async function login({ email, password }) {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
+    // Run bcrypt anyway so the response time is the same whether the email exists or not.
+    await bcrypt.compare(password, DUMMY_HASH);
     const err = new Error('Invalid credentials');
     err.statusCode = 401;
     err.publicMessage = err.message;
@@ -105,4 +113,35 @@ export async function login({ email, password }) {
     },
     business: business ? { id: business.id, name: business.name } : null,
   };
+}
+
+/**
+ * Self-service password change. Requires the current password to be correct.
+ */
+export async function changePassword({ userId, currentPassword, newPassword }) {
+  if (!newPassword || newPassword.length < MIN_PASSWORD_LEN) {
+    const err = new Error(`New password must be at least ${MIN_PASSWORD_LEN} characters`);
+    err.statusCode = 400;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    const err = new Error('User not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const valid = await bcrypt.compare(currentPassword, user.password);
+  if (!valid) {
+    const err = new Error('Current password is incorrect');
+    err.statusCode = 400;
+    err.publicMessage = err.message;
+    throw err;
+  }
+
+  const hash = await bcrypt.hash(newPassword, 12);
+  await prisma.user.update({ where: { id: userId }, data: { password: hash } });
+  return { ok: true };
 }

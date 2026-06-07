@@ -188,6 +188,9 @@ export async function createStaff(req, res, next) {
     if (!body.staffCode || !body.name) {
       return res.status(400).json({ error: 'staffCode and name required' });
     }
+    if (body.profilePicture && !/^https:\/\//i.test(String(body.profilePicture))) {
+      return res.status(400).json({ error: 'profilePicture must be an HTTPS URL' });
+    }
     const row = await prisma.staffMember.create({
       data: {
         businessId: tenant(req),
@@ -229,6 +232,10 @@ export async function updateStaff(req, res, next) {
       where: { id: req.params.id, businessId: tenant(req), deletedAt: null },
     });
     if (!existing) return res.status(404).json({ error: 'Staff not found' });
+
+    if (body.profilePicture && !/^https:\/\//i.test(String(body.profilePicture))) {
+      return res.status(400).json({ error: 'profilePicture must be an HTTPS URL' });
+    }
 
     const data = {
       name: body.name,
@@ -364,6 +371,10 @@ export async function confirmStaffProfilePicture(req, res, next) {
     const staffId = req.params.id;
     const body = req.body || {};
     if (!body.publicUrl) return res.status(400).json({ error: 'publicUrl required' });
+    // Enforce HTTPS — same guard applied in createStaff / updateStaff.
+    if (!/^https:\/\//i.test(String(body.publicUrl))) {
+      return res.status(400).json({ error: 'publicUrl must be an HTTPS URL' });
+    }
 
     const existing = await prisma.staffMember.findFirst({
       where: { id: staffId, businessId: tenant(req), deletedAt: null },
@@ -661,8 +672,13 @@ export async function deleteStaffLeave(req, res, next) {
 export async function listBreaks(req, res, next) {
   try {
     const staffId = req.params.staffId;
+    // Verify staff belongs to the caller's business before exposing break schedule.
+    const staff = await prisma.staffMember.findFirst({
+      where: { id: staffId, businessId: tenant(req), deletedAt: null },
+    });
+    if (!staff) return res.status(404).json({ error: 'Staff not found' });
     const rows = await prisma.staffBreak.findMany({
-      where: { staffId },
+      where: { staffId: staff.id },
       orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
     });
     res.json(rows);
@@ -698,8 +714,13 @@ export async function createBreak(req, res, next) {
 
 export async function deleteBreak(req, res, next) {
   try {
+    // Verify staff belongs to the caller's business to prevent cross-tenant deletion.
+    const staff = await prisma.staffMember.findFirst({
+      where: { id: req.params.staffId, businessId: tenant(req), deletedAt: null },
+    });
+    if (!staff) return res.status(404).json({ error: 'Staff not found' });
     const br = await prisma.staffBreak.findFirst({
-      where: { id: req.params.breakId, staffId: req.params.staffId },
+      where: { id: req.params.breakId, staffId: staff.id },
     });
     if (!br) return res.status(404).json({ error: 'Break not found' });
     await prisma.staffBreak.delete({ where: { id: br.id } });
@@ -990,7 +1011,11 @@ export async function exportAppointmentsCsv(req, res, next) {
 
     const escape = (v) => {
       const s = String(v ?? '');
-      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+      // Prefix formula-starting characters to prevent CSV injection in Excel / LibreOffice.
+      const safe = /^[=+@\-]/.test(s) ? `'${s}` : s;
+      return safe.includes(',') || safe.includes('"') || safe.includes('\n')
+        ? `"${safe.replace(/"/g, '""')}"`
+        : safe;
     };
 
     const header = [
@@ -1156,6 +1181,7 @@ export async function listWaitlist(req, res, next) {
       where: { businessId: tenant(req), status: { in: ['ACTIVE', 'NOTIFIED'] } },
       include: { customer: true, service: true, location: true, staff: true },
       orderBy: [{ priorityScore: 'desc' }, { createdAt: 'asc' }],
+      take: 500,
     });
     res.json(rows);
   } catch (e) {
@@ -1174,7 +1200,11 @@ export async function exportWaitlistCsv(req, res, next) {
 
     const escape = (v) => {
       const s = String(v ?? '');
-      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+      // Prefix formula-starting characters to prevent CSV injection in Excel / LibreOffice.
+      const safe = /^[=+@\-]/.test(s) ? `'${s}` : s;
+      return safe.includes(',') || safe.includes('"') || safe.includes('\n')
+        ? `"${safe.replace(/"/g, '""')}"`
+        : safe;
     };
 
     const header = [
@@ -1239,6 +1269,11 @@ export async function getAppointmentManageLink(req, res, next) {
 export async function rateAppointment(req, res, next) {
   try {
     const { rating, feedback } = req.body || {};
+    const score = Number(rating);
+    if (!Number.isFinite(score) || score < 1 || score > 5) {
+      return res.status(400).json({ error: 'rating must be 1–5' });
+    }
+    const safeFeedback = feedback ? String(feedback).slice(0, 2000) : null;
     const appt = await prisma.appointment.findFirst({
       where: { id: req.params.id, businessId: tenant(req) },
     });
@@ -1251,10 +1286,10 @@ export async function rateAppointment(req, res, next) {
         customerId: appt.customerId,
         staffId: appt.staffId,
         serviceId: appt.serviceId,
-        rating: Number(rating),
-        feedback,
+        rating: score,
+        feedback: safeFeedback,
       },
-      update: { rating: Number(rating), feedback },
+      update: { rating: score, feedback: safeFeedback },
     });
     void refreshCustomerAppointmentStats(tenant(req), appt.customerId).catch(() => {});
     res.json(row);
@@ -1265,7 +1300,7 @@ export async function rateAppointment(req, res, next) {
 
 export async function listRecentRatings(req, res, next) {
   try {
-    const days = Number(req.query.days) || 30;
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
     const since = new Date();
     since.setDate(since.getDate() - days);
     const rows = await prisma.appointmentRating.findMany({
@@ -1314,7 +1349,7 @@ export async function businessScheduleToday(req, res, next) {
 export async function analyticsSummary(req, res, next) {
   try {
     const data = await getSchedulingAnalytics(tenant(req), {
-      days: Number(req.query.days) || 30,
+      days: Math.min(365, Math.max(1, Number(req.query.days) || 30)),
     });
     res.json(data);
   } catch (e) {
@@ -1349,7 +1384,7 @@ export async function staffScheduleUpcoming(req, res, next) {
       if (!profile) return res.status(404).json({ error: 'Staff profile not linked to user' });
       staffId = profile.id;
     }
-    const days = Number(req.query.days) || 7;
+    const days = Math.min(30, Math.max(1, Number(req.query.days) || 7));
     const rows = await getStaffUpcomingSchedule(tenant(req), staffId, { days });
     res.json(rows);
   } catch (e) {
@@ -1411,6 +1446,8 @@ export async function getPublicAppointmentSlots(req, res, next) {
   }
 }
 
+const RATING_THROTTLE_MS = Number(process.env.RATING_THROTTLE_MS || 30_000); // 30 s
+
 export async function publicRateAppointment(req, res, next) {
   try {
     const payload = resolveAppointmentActionToken(req.params.token);
@@ -1428,6 +1465,20 @@ export async function publicRateAppointment(req, res, next) {
       return res.status(400).json({ error: 'Only completed appointments can be rated' });
     }
 
+    // Throttle: if a rating already exists and was updated recently, reject re-submission.
+    const existing = await prisma.appointmentRating.findUnique({
+      where: { appointmentId: appt.id },
+    });
+    if (existing) {
+      const msSinceUpdate = Date.now() - new Date(existing.updatedAt).getTime();
+      if (msSinceUpdate < RATING_THROTTLE_MS) {
+        const retryAfter = Math.ceil((RATING_THROTTLE_MS - msSinceUpdate) / 1000);
+        res.setHeader('Retry-After', retryAfter);
+        return res.status(429).json({ error: `Rating already submitted. Please wait ${retryAfter}s before updating.` });
+      }
+    }
+
+    const safeFeedback = feedback ? String(feedback).slice(0, 2000) : null;
     const row = await prisma.appointmentRating.upsert({
       where: { appointmentId: appt.id },
       create: {
@@ -1437,9 +1488,9 @@ export async function publicRateAppointment(req, res, next) {
         staffId: appt.staffId,
         serviceId: appt.serviceId,
         rating: score,
-        feedback: feedback || null,
+        feedback: safeFeedback,
       },
-      update: { rating: score, feedback: feedback || null },
+      update: { rating: score, feedback: safeFeedback },
     });
     void refreshCustomerAppointmentStats(payload.businessId, appt.customerId).catch(() => {});
     res.json(row);
@@ -1486,6 +1537,14 @@ export async function publicAppointmentAction(req, res, next) {
       where: { id: payload.appointmentId, businessId: payload.businessId },
     });
     if (!appt) return res.status(404).json({ error: 'Appointment not found' });
+
+    // Block mutations on appointments that are already finished or cancelled.
+    const terminal = ['CANCELLED', 'COMPLETED', 'NO_SHOW'];
+    if (terminal.includes(appt.status)) {
+      return res.status(409).json({
+        error: `Appointment is already ${appt.status.toLowerCase()} and cannot be modified`,
+      });
+    }
 
     if (action === 'confirm') {
       const row = await updateAppointmentStatus({

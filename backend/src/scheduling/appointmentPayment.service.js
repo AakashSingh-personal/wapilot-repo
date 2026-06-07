@@ -40,10 +40,13 @@ export async function createAppointmentPaymentIntent({
 
   let chargeAmount = amountDue;
   if (mode === 'advance') {
-    chargeAmount = Math.max(
-      1,
-      Math.round((Number(appt.amount) * Math.min(100, Math.max(1, advancePercent))) / 100),
-    );
+    const pct = Number(advancePercent);
+    if (!Number.isFinite(pct) || pct <= 0) {
+      const err = new Error('advancePercent must be a positive number between 1 and 100');
+      err.statusCode = 400;
+      throw err;
+    }
+    chargeAmount = Math.max(1, Math.round((Number(appt.amount) * Math.min(100, Math.max(1, pct))) / 100));
     chargeAmount = Math.min(chargeAmount, amountDue);
   }
 

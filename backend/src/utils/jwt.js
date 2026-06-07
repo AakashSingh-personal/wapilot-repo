@@ -11,5 +11,6 @@ export function signToken(payload, expiresIn = '7d') {
 }
 
 export function verifyToken(token) {
-  return jwt.verify(token, secret());
+  // Pin algorithm to prevent alg:none and RS256 confusion attacks.
+  return jwt.verify(token, secret(), { algorithms: ['HS256'] });
 }

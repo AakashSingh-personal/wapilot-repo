@@ -450,7 +450,23 @@ export async function handleOutlookCalendarWebhook(req) {
       },
     });
     if (!conn) continue;
-    if (clientState && conn.webhookResourceId && clientState !== conn.webhookResourceId) continue;
+
+    // Verify clientState when a value is stored — mirrors the Google Calendar token check.
+    if (conn.webhookResourceId) {
+      if (!clientState) {
+        log('warn', 'outlook_webhook_missing_clientstate', { connectionId: conn.id });
+        continue;
+      }
+      const expected = Buffer.from(conn.webhookResourceId);
+      const provided = Buffer.from(String(clientState));
+      if (
+        expected.length !== provided.length ||
+        !crypto.timingSafeEqual(expected, provided)
+      ) {
+        log('warn', 'outlook_webhook_invalid_clientstate', { connectionId: conn.id });
+        continue;
+      }
+    }
 
     try {
       const result = await pullOutlookCalendarBlocks(conn.id);

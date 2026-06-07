@@ -489,11 +489,19 @@ function parseCsvLoose(text) {
   return { headers, rows };
 }
 
+const MAX_VARIABLE_CSV_BYTES = Number(process.env.MAX_VARIABLE_CSV_BYTES || 512 * 1024); // 512 KB
+const MAX_VARIABLE_CSV_ROWS = Number(process.env.MAX_VARIABLE_CSV_ROWS || 5_000);
+
 export async function importCustomerVariablesCsv(req, res, next) {
   try {
     const { csvText, phoneColumn = 'phone', variableColumns = [] } = req.body || {};
     if (!csvText || typeof csvText !== 'string') {
       return res.status(400).json({ error: 'csvText is required' });
+    }
+    if (Buffer.byteLength(csvText) > MAX_VARIABLE_CSV_BYTES) {
+      return res.status(413).json({
+        error: `csvText exceeds the maximum allowed size of ${Math.round(MAX_VARIABLE_CSV_BYTES / 1024)} KB`,
+      });
     }
     const cols = Array.isArray(variableColumns) ? variableColumns.map((c) => String(c).trim().toLowerCase()) : [];
     if (!cols.length) {
@@ -503,6 +511,11 @@ export async function importCustomerVariablesCsv(req, res, next) {
     const phoneKey = String(phoneColumn || 'phone').trim().toLowerCase();
     const { rows } = parseCsvLoose(csvText);
     if (!rows.length) return res.status(400).json({ error: 'No data rows in CSV.' });
+    if (rows.length > MAX_VARIABLE_CSV_ROWS) {
+      return res.status(400).json({
+        error: `CSV contains ${rows.length} rows; maximum allowed per request is ${MAX_VARIABLE_CSV_ROWS}`,
+      });
+    }
 
     const defs = await prisma.variableDefinition.findMany({
       where: { businessId: req.user.businessId, type: 'CUSTOMER', key: { in: cols } },
@@ -538,7 +551,9 @@ export async function importCustomerVariablesCsv(req, res, next) {
       for (const col of cols) {
         const def = defByKey.get(col);
         if (!def || !Object.prototype.hasOwnProperty.call(row, col)) continue;
-        const val = row[col] === undefined || row[col] === null ? '' : String(row[col]);
+        // Escape CSV formula injection: cells starting with =, +, @, - can execute in Excel/Sheets.
+        const raw = row[col] === undefined || row[col] === null ? '' : String(row[col]);
+        const val = /^[=+@\-]/.test(raw) ? `'${raw}` : raw;
         await prisma.customerVariableValue.upsert({
           where: {
             customerId_variableDefinitionId: {

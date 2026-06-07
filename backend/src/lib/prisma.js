@@ -8,7 +8,12 @@ const globalForPrisma = globalThis;
 function poolOptions(connectionString) {
   const opts = { connectionString };
   if (/sslmode=require|neon\.tech|amazonaws\.com/i.test(connectionString || '')) {
-    opts.ssl = { rejectUnauthorized: false };
+    // Validate the server certificate by default (protects against MITM).
+    // Neon uses Let's Encrypt; AWS RDS uses Amazon root CAs — both trusted by Node's
+    // built-in CA bundle.  Set POSTGRES_SSL_REJECT_UNAUTHORIZED=0 only as a last resort
+    // (e.g. self-signed cert in a private network) and document the trade-off.
+    const rejectUnauthorized = process.env.POSTGRES_SSL_REJECT_UNAUTHORIZED !== '0';
+    opts.ssl = { rejectUnauthorized };
   }
   return opts;
 }

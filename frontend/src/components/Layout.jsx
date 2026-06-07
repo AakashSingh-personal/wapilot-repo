@@ -33,27 +33,26 @@ function buildNav(role) {
 }
 
 export default function Layout() {
-  const { logout, business, user, loginState } = useAuth();
+  const { logout, business, user, loginState, returnToken, setReturnToken } = useAuth();
   const { theme, toggle } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [returningToChief, setReturningToChief] = useState(false);
   const navigate = useNavigate();
   const nav = buildNav(user?.role);
-  const hasReturnToken =
-    user?.role !== 'CHIEF_ADMIN' && Boolean(sessionStorage.getItem('wapilot_chiefadmin_return_token'));
+  // returnToken lives in React state only — never written to storage.
+  const hasReturnToken = user?.role !== 'CHIEF_ADMIN' && Boolean(returnToken);
 
   async function backToChiefAdmin() {
-    const returnToken = sessionStorage.getItem('wapilot_chiefadmin_return_token');
     if (!returnToken || returningToChief) return;
     setReturningToChief(true);
     try {
       const { data } = await api.post('/admin/return-session', { returnToken });
-      sessionStorage.removeItem('wapilot_chiefadmin_return_token');
+      setReturnToken(null);
       loginState(data);
       navigate('/chiefadmin');
     } catch {
-      sessionStorage.removeItem('wapilot_chiefadmin_return_token');
+      setReturnToken(null);
     } finally {
       setReturningToChief(false);
     }

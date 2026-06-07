@@ -20,7 +20,7 @@ router.put('/config', authMiddleware, configController.updateConfig);
 
 router.get('/billing/status', authMiddleware, billingController.subscriptionStatus);
 router.get('/billing/pro-qr', authMiddleware, billingController.subscriptionQr);
-router.post('/billing/mark-paid', authMiddleware, billingController.markSubscriptionPaid);
+router.post('/billing/mark-paid', authMiddleware, requireOwner, billingController.markSubscriptionPaid);
 router.patch(
   '/billing/payments/:id/verify',
   authMiddleware,

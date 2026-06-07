@@ -15,8 +15,12 @@ export async function createPaymentLink(req, res, next) {
 
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
     const amtNum = Number(amount);
+    const MAX_PAYMENT_AMOUNT = Number(process.env.MAX_PAYMENT_LINK_AMOUNT || 100000); // ₹1,00,000
     if (!Number.isFinite(amtNum) || amtNum <= 0) {
       return res.status(400).json({ error: 'Valid amount required' });
+    }
+    if (amtNum > MAX_PAYMENT_AMOUNT) {
+      return res.status(400).json({ error: `Amount exceeds maximum allowed (₹${MAX_PAYMENT_AMOUNT.toLocaleString('en-IN')})` });
     }
 
     const cp = await prisma.customerPayment.create({
