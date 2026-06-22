@@ -162,6 +162,9 @@ export default function Scheduling() {
     city: '',
     phone: '',
     mediaUrls: [],
+    geoFenceEnabled: false,
+    allowedRadiusMeters: 100,
+    outsideRadiusAction: 'WARN',
   });
   const [editingLocationId, setEditingLocationId] = useState('');
   const [selectedApptId, setSelectedApptId] = useState('');
@@ -1156,6 +1159,9 @@ export default function Scheduling() {
       city: loc.city || '',
       phone: loc.phone || '',
       mediaUrls: urls,
+      geoFenceEnabled: loc.geoFenceEnabled || false,
+      allowedRadiusMeters: loc.allowedRadiusMeters || 100,
+      outsideRadiusAction: loc.outsideRadiusAction || 'WARN',
     });
   }
 
@@ -1169,6 +1175,9 @@ export default function Scheduling() {
       city: '',
       phone: '',
       mediaUrls: [],
+      geoFenceEnabled: false,
+      allowedRadiusMeters: 100,
+      outsideRadiusAction: 'WARN',
     });
   }
 
@@ -1183,6 +1192,9 @@ export default function Scheduling() {
           city: locationForm.city || null,
           phone: locationForm.phone || null,
           mediaUrls: locationForm.mediaUrls || [],
+          geoFenceEnabled: locationForm.geoFenceEnabled,
+          allowedRadiusMeters: parseInt(locationForm.allowedRadiusMeters, 10) || 100,
+          outsideRadiusAction: locationForm.outsideRadiusAction,
         });
         setInfo('Location updated');
         cancelEditLocation();
@@ -1195,6 +1207,9 @@ export default function Scheduling() {
           city: locationForm.city || null,
           phone: locationForm.phone || null,
           mediaUrls: locationForm.mediaUrls || [],
+          geoFenceEnabled: locationForm.geoFenceEnabled,
+          allowedRadiusMeters: parseInt(locationForm.allowedRadiusMeters, 10) || 100,
+          outsideRadiusAction: locationForm.outsideRadiusAction,
         });
         setInfo('Location created');
         cancelEditLocation();
@@ -2429,6 +2444,46 @@ export default function Scheduling() {
                   }}
                 />
               </label>
+            </div>
+            {/* Geo-fence settings */}
+            <div className="space-y-2 pt-1">
+              <div className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Geo-Fence</div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={locationForm.geoFenceEnabled}
+                  onChange={e => setLocationForm(f => ({ ...f, geoFenceEnabled: e.target.checked }))}
+                  className="rounded"
+                />
+                Enable geo-fencing for attendance check-in
+              </label>
+              {locationForm.geoFenceEnabled && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-neutral-500 mb-1">Allowed radius (metres)</label>
+                    <input
+                      type="number"
+                      min={10}
+                      max={5000}
+                      value={locationForm.allowedRadiusMeters}
+                      onChange={e => setLocationForm(f => ({ ...f, allowedRadiusMeters: e.target.value }))}
+                      className="w-full rounded-xl border px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-neutral-500 mb-1">Outside radius action</label>
+                    <select
+                      value={locationForm.outsideRadiusAction}
+                      onChange={e => setLocationForm(f => ({ ...f, outsideRadiusAction: e.target.value }))}
+                      className="w-full rounded-xl border px-3 py-2 text-sm bg-white dark:bg-neutral-900"
+                    >
+                      <option value="WARN">Warn (allow with warning)</option>
+                      <option value="REQUIRE_APPROVAL">Require manager approval</option>
+                      <option value="REJECT">Reject check-in</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <button type="submit" className="rounded-xl bg-brand-600 text-white px-4 py-2 text-sm font-semibold">

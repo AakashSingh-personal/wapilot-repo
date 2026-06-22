@@ -5,7 +5,7 @@ import {
   ClipboardList, CreditCard, Wallet, Send, LayoutTemplate, Sparkles,
   BookUser, BookOpen, Receipt, UserCog, Settings, ShieldCheck,
   ChevronLeft, ChevronRight, LogOut, Sun, Moon, Menu, X,
-  ArrowLeftRight,
+  ArrowLeftRight, UserCheck, BadgeDollarSign, Banknote,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useTheme } from '../context/ThemeContext.jsx';
@@ -48,6 +48,9 @@ function buildNav(role) {
         { to: '/bookings',       label: 'Bookings',       icon: CalendarDays },
         { to: '/scheduling',     label: 'Scheduling',     icon: Calendar },
         { to: '/staff-schedule', label: 'Staff Day',      icon: ClipboardList },
+        { to: '/attendance',     label: 'Attendance',     icon: UserCheck },
+        { to: '/commission',     label: 'Commissions',    icon: BadgeDollarSign },
+        { to: '/payroll',        label: 'Payroll',        icon: Banknote },
       ],
     },
     {

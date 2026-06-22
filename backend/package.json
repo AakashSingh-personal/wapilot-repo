@@ -38,6 +38,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.10.1",
     "openai": "^4.96.0",
+    "pdfkit": "^0.19.0",
     "pg": "^8.16.0",
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.6",

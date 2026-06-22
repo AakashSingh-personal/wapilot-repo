@@ -12,6 +12,7 @@ import {
 import { createAppointmentPaymentIntent } from './appointmentPayment.service.js';
 import { acquireSlotLock, releaseSlotLock } from './slotLock.service.js';
 import { refreshCustomerAppointmentStats } from './customerStats.service.js';
+import { calculateCommissionForAppointment } from './commission.service.js';
 
 const ACTIVE_APPT = ['PENDING', 'CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS'];
 
@@ -299,6 +300,7 @@ export async function updateAppointmentStatus({
 
   if (toStatus === 'COMPLETED') {
     void sendRatingRequestWhatsApp(updated).catch(() => {});
+    void calculateCommissionForAppointment(appointmentId, businessId).catch(() => {});
   }
 
   if (toStatus === 'CONFIRMED' && appt.status === 'PENDING') {

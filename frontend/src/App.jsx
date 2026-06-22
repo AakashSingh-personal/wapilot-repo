@@ -25,6 +25,9 @@ import Settings from './pages/Settings.jsx';
 import Communications from './pages/Communications.jsx';
 import ChiefAdmin from './pages/ChiefAdmin.jsx';
 import UserManagement from './pages/UserManagement.jsx';
+import Attendance from './pages/Attendance.jsx';
+import Commission from './pages/Commission.jsx';
+import Payroll from './pages/Payroll.jsx';
 
 export default function App() {
   const { isAuthenticated, bootstrapping, token } = useAuth();
@@ -74,6 +77,9 @@ export default function App() {
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/scheduling" element={<Scheduling />} />
         <Route path="/staff-schedule" element={<StaffSchedule />} />
+        <Route path="/attendance" element={<Attendance />} />
+        <Route path="/commission" element={<Commission />} />
+        <Route path="/payroll" element={<Payroll />} />
         <Route path="/payments" element={<Payments />} />
         <Route path="/communications" element={<Navigate to="/communications/wallet" replace />} />
         <Route path="/communications/wallet" element={<Communications forcedTab="WALLET" />} />

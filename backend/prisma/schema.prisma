@@ -82,6 +82,62 @@ enum AiResumeMode {
   LAST_CUSTOMER_MESSAGE
 }
 
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+  LEAVE
+  HOLIDAY
+  WFH
+  FIELD_DUTY
+}
+
+enum CheckInSource {
+  GEO
+  QR
+  MANUAL
+  BIOMETRIC
+}
+
+enum OutsideRadiusAction {
+  WARN
+  REQUIRE_APPROVAL
+  REJECT
+}
+
+enum ShiftType {
+  FIXED
+  ROTATIONAL
+  SPLIT
+  FLEXIBLE
+}
+
+enum CommissionType {
+  PERCENTAGE
+  FIXED
+  TIER
+  PRODUCT
+  TEAM
+}
+
+enum PayrollFrequency {
+  MONTHLY
+  WEEKLY
+  BIWEEKLY
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  FINALIZED
+  PAID
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+}
+
 enum StaffStatus {
   ACTIVE
   INACTIVE
@@ -172,6 +228,7 @@ model Business {
   businessHolidays BusinessHoliday[]
   waitlistEntries  WaitlistEntry[]
   calendarConnections CalendarConnection[]
+  attendanceRecords   AttendanceRecord[]
 }
 
 model User {
@@ -290,17 +347,21 @@ model Location {
   email        String?
   imageUrl     String?
   mediaUrls    Json      @default("[]")
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  isActive              Boolean              @default(true)
+  geoFenceEnabled       Boolean              @default(false)
+  allowedRadiusMeters   Int                  @default(100)
+  outsideRadiusAction   OutsideRadiusAction  @default(WARN)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  deletedAt             DateTime?
 
-  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  staffLinks   StaffLocation[]
-  appointments Appointment[]
-  waitlist     WaitlistEntry[]
-  holidays     BusinessHoliday[]
-  workingHours StaffWorkingHours[]
+  business         Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  staffLinks       StaffLocation[]
+  appointments     Appointment[]
+  waitlist         WaitlistEntry[]
+  holidays         BusinessHoliday[]
+  workingHours     StaffWorkingHours[]
+  attendanceRecords AttendanceRecord[]
 
   @@unique([businessId, code])
   @@index([businessId])
@@ -322,23 +383,29 @@ model StaffMember {
   activeStatus   StaffStatus @default(ACTIVE)
   createdById    String?     @db.Uuid
   updatedById    String?     @db.Uuid
+  qrToken        String?     @unique
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   deletedAt      DateTime?
 
-  business       Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  user           User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-  locations      StaffLocation[]
-  services       StaffService[]
-  workingHours   StaffWorkingHours[]
-  breaks         StaffBreak[]
-  leaves         StaffLeave[]
+  business          Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user              User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  locations         StaffLocation[]
+  services          StaffService[]
+  workingHours      StaffWorkingHours[]
+  breaks            StaffBreak[]
+  leaves            StaffLeave[]
   availabilityRules StaffAvailabilityRule[]
-  appointments   Appointment[]
-  waitlistPrefs  WaitlistEntry[]
-  calendarBlocks CalendarBlockedSlot[]
-  calendarConns  CalendarConnection[]
-  ratings        AppointmentRating[]
+  appointments      Appointment[]
+  waitlistPrefs     WaitlistEntry[]
+  calendarBlocks    CalendarBlockedSlot[]
+  calendarConns     CalendarConnection[]
+  ratings           AppointmentRating[]
+  attendanceRecords  AttendanceRecord[]
+  shiftAssignments   StaffShiftAssignment[]
+  commissionRecords  CommissionRecord[]
+  payrollConfig      StaffPayrollConfig?
+  payrollEntries     PayrollEntry[]
 
   @@unique([businessId, staffCode])
   @@index([businessId, activeStatus])
@@ -518,8 +585,9 @@ model Appointment {
   reminders  ReminderSchedule[]
   rating     AppointmentRating?
   statusHistory AppointmentStatusHistory[]
-  idempotencyKeys BookingIdempotencyKey[]
-  calendarEvents AppointmentCalendarEvent[]
+  idempotencyKeys   BookingIdempotencyKey[]
+  calendarEvents    AppointmentCalendarEvent[]
+  commissionRecords CommissionRecord[]
 
   @@unique([businessId, appointmentNumber])
   @@index([businessId, staffId, startAt])
@@ -746,6 +814,211 @@ model StaffAvailabilityRule {
   staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
   @@index([staffId, isActive])
+}
+
+model AttendanceRecord {
+  id                String           @id @default(uuid()) @db.Uuid
+  businessId        String           @db.Uuid
+  staffId           String           @db.Uuid
+  locationId        String?          @db.Uuid
+  date              DateTime         @db.Date
+  status            AttendanceStatus @default(PRESENT)
+  checkInTime       DateTime?
+  checkInLat        Decimal?         @db.Decimal(10, 7)
+  checkInLng        Decimal?         @db.Decimal(10, 7)
+  checkInSource     CheckInSource?
+  checkInDeviceInfo Json             @default("{}")
+  checkInSelfieUrl  String?
+  checkInDistanceM  Int?
+  checkOutTime      DateTime?
+  checkOutLat       Decimal?         @db.Decimal(10, 7)
+  checkOutLng       Decimal?         @db.Decimal(10, 7)
+  workingMinutes    Int?
+  outsideRadius     Boolean          @default(false)
+  approvedById      String?          @db.Uuid
+  approvedAt        DateTime?
+  notes             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  business Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  staff    StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  location Location?   @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@unique([businessId, staffId, date])
+  @@index([businessId, date])
+  @@index([staffId, date])
+}
+
+model ShiftTemplate {
+  id               String    @id @default(uuid()) @db.Uuid
+  businessId       String    @db.Uuid
+  name             String
+  type             ShiftType @default(FIXED)
+  startTime        String
+  endTime          String
+  splitStartTime2  String?
+  splitEndTime2    String?
+  breakMinutes     Int       @default(0)
+  graceLateMinutes Int       @default(0)
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  assignments StaffShiftAssignment[]
+
+  @@index([businessId, isActive])
+}
+
+model StaffShiftAssignment {
+  id              String    @id @default(uuid()) @db.Uuid
+  businessId      String    @db.Uuid
+  staffId         String    @db.Uuid
+  shiftId         String    @db.Uuid
+  effectiveFrom   DateTime  @db.Date
+  effectiveTo     DateTime? @db.Date
+  rotationCycleDay Int?
+  createdAt       DateTime  @default(now())
+
+  staff StaffMember    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  shift ShiftTemplate  @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, effectiveFrom])
+  @@index([businessId])
+}
+
+model CommissionRule {
+  id               String         @id @default(uuid()) @db.Uuid
+  businessId       String         @db.Uuid
+  staffId          String?        @db.Uuid
+  serviceId        String?        @db.Uuid
+  type             CommissionType
+  value            Decimal        @default(0) @db.Decimal(12, 4)
+  tierSlabs        Json           @default("[]")
+  teamManagerId    String?        @db.Uuid
+  priority         Int            @default(0)
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  commissionRecords CommissionRecord[]
+
+  @@index([businessId, isActive])
+  @@index([businessId, staffId])
+}
+
+model CommissionRecord {
+  id              String           @id @default(uuid()) @db.Uuid
+  businessId      String           @db.Uuid
+  staffId         String           @db.Uuid
+  appointmentId   String           @db.Uuid
+  ruleId          String?          @db.Uuid
+  calculatedAmount Decimal         @db.Decimal(12, 2)
+  status          CommissionStatus @default(PENDING)
+  approvedById    String?          @db.Uuid
+  approvedAt      DateTime?
+  paymentBatchId  String?
+  paidAt          DateTime?
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  staff       StaffMember  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  appointment Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  rule        CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+
+  @@unique([businessId, staffId, appointmentId])
+  @@index([businessId, status])
+  @@index([businessId, staffId, status])
+}
+
+model PayrollConfig {
+  id               String           @id @default(uuid()) @db.Uuid
+  businessId       String           @unique @db.Uuid
+  frequency        PayrollFrequency @default(MONTHLY)
+  payDay           Int              @default(1)
+  cutoffDay        Int              @default(25)
+  overtimeRatePerHour Decimal       @default(0) @db.Decimal(10, 2)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
+model StaffPayrollConfig {
+  id                      String   @id @default(uuid()) @db.Uuid
+  businessId              String   @db.Uuid
+  staffId                 String   @unique @db.Uuid
+  basicSalary             Decimal  @default(0) @db.Decimal(12, 2)
+  travelAllowance         Decimal  @default(0) @db.Decimal(12, 2)
+  pfEnabled               Boolean  @default(false)
+  pfRate                  Decimal  @default(12) @db.Decimal(5, 2)
+  esiEnabled              Boolean  @default(false)
+  esiRate                 Decimal  @default(0.75) @db.Decimal(5, 2)
+  taxRate                 Decimal  @default(0) @db.Decimal(5, 2)
+  lateDeductionPerMinute  Decimal  @default(0) @db.Decimal(8, 4)
+  leaveDayDeductionRate   Decimal  @default(1) @db.Decimal(5, 4)
+  bankAccountNumber       String?
+  bankIfsc                String?
+  bankAccountName         String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+model PayrollRun {
+  id          String           @id @default(uuid()) @db.Uuid
+  businessId  String           @db.Uuid
+  periodStart DateTime         @db.Date
+  periodEnd   DateTime         @db.Date
+  status      PayrollRunStatus @default(DRAFT)
+  generatedAt DateTime?
+  finalizedAt DateTime?
+  paidAt      DateTime?
+  notes       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  entries PayrollEntry[]
+
+  @@index([businessId, status])
+  @@index([businessId, periodStart])
+}
+
+model PayrollEntry {
+  id              String  @id @default(uuid()) @db.Uuid
+  businessId      String  @db.Uuid
+  payrollRunId    String  @db.Uuid
+  staffId         String  @db.Uuid
+  basicSalary     Decimal @default(0) @db.Decimal(12, 2)
+  travelAllowance Decimal @default(0) @db.Decimal(12, 2)
+  overtime        Decimal @default(0) @db.Decimal(12, 2)
+  commission      Decimal @default(0) @db.Decimal(12, 2)
+  bonus           Decimal @default(0) @db.Decimal(12, 2)
+  grossEarnings   Decimal @default(0) @db.Decimal(12, 2)
+  leaveDeduction  Decimal @default(0) @db.Decimal(12, 2)
+  lateDeduction   Decimal @default(0) @db.Decimal(12, 2)
+  pf              Decimal @default(0) @db.Decimal(12, 2)
+  esi             Decimal @default(0) @db.Decimal(12, 2)
+  tax             Decimal @default(0) @db.Decimal(12, 2)
+  totalDeductions Decimal @default(0) @db.Decimal(12, 2)
+  netPay          Decimal @default(0) @db.Decimal(12, 2)
+  presentDays     Int     @default(0)
+  absentDays      Int     @default(0)
+  halfDays        Int     @default(0)
+  leaveDays       Int     @default(0)
+  lateMinutes     Int     @default(0)
+  overtimeMinutes Int     @default(0)
+  slipPdfUrl      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  run   PayrollRun  @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  @@unique([payrollRunId, staffId])
+  @@index([businessId, staffId])
 }
 
 model BusinessConfig {

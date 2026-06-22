@@ -63,6 +63,55 @@ import { createAppointmentPaymentIntent } from '../scheduling/appointmentPayment
 import { getCustomerAppointmentStats, refreshCustomerAppointmentStats } from '../scheduling/customerStats.service.js';
 import { resolveAppointmentActionToken } from '../scheduling/appointmentToken.service.js';
 import { sendRebookingCampaign } from '../scheduling/rebooking.service.js';
+import {
+  checkIn,
+  checkOut,
+  checkInByQr,
+  approveAttendance,
+  listAttendance,
+  getDashboardSummary as getAttendanceDashboardSummary,
+  generateStaffQrToken,
+  markManualAttendance,
+} from '../scheduling/attendance.service.js';
+import {
+  listShifts,
+  createShift,
+  updateShift,
+  deleteShift,
+  assignShift,
+  listStaffShiftAssignments,
+  deleteShiftAssignment,
+  getDailyAttendanceReport,
+  getMonthlyAttendanceReport,
+  getLateArrivalReport,
+  getOvertimeReport,
+} from '../scheduling/shift.service.js';
+import {
+  listCommissionRules,
+  createCommissionRule,
+  updateCommissionRule,
+  deleteCommissionRule,
+  listCommissionRecords,
+  getCommissionSummary,
+  getCommissionLeaderboard,
+  approveCommissions,
+  markCommissionsPaid,
+} from '../scheduling/commission.service.js';
+import {
+  getPayrollConfig,
+  updatePayrollConfig,
+  listStaffPayrollConfigs,
+  upsertStaffPayrollConfig,
+  generatePayrollRun,
+  listPayrollRuns,
+  getPayrollRun,
+  finalizePayrollRun,
+  markPayrollRunPaid,
+  updatePayrollEntry,
+  generateSalarySlipPdf,
+  exportBankTransferFile,
+  getPayrollSummary,
+} from '../scheduling/payroll.service.js';
 import { presetToRrule } from '../scheduling/rrule.service.js';
 import { withBookingIdempotency } from '../scheduling/idempotency.service.js';
 import QRCode from 'qrcode';
@@ -157,6 +206,9 @@ export async function updateLocation(req, res, next) {
       city: body.city,
       phone: body.phone,
       isActive: body.isActive,
+      ...(body.geoFenceEnabled !== undefined && { geoFenceEnabled: Boolean(body.geoFenceEnabled) }),
+      ...(body.allowedRadiusMeters !== undefined && { allowedRadiusMeters: parseInt(body.allowedRadiusMeters, 10) || 100 }),
+      ...(body.outsideRadiusAction !== undefined && { outsideRadiusAction: body.outsideRadiusAction }),
     };
     if (body.mediaUrls !== undefined) {
       const urls = Array.isArray(body.mediaUrls) ? body.mediaUrls.filter(Boolean) : [];
@@ -2010,5 +2062,475 @@ export async function outlookCalendarWebhook(req, res) {
     return res.status(202).send();
   } catch {
     return res.status(202).send();
+  }
+}
+
+// ─── Attendance / Geo Check-In ───
+
+export async function attendanceCheckIn(req, res, next) {
+  try {
+    const { staffId, locationId, lat, lng, source, deviceInfo, selfieUrl } = req.body || {};
+    if (!staffId) return res.status(400).json({ error: 'staffId required' });
+    const result = await checkIn({
+      businessId: tenant(req),
+      staffId,
+      locationId: locationId || null,
+      lat: lat != null ? parseFloat(lat) : null,
+      lng: lng != null ? parseFloat(lng) : null,
+      source: source || 'GEO',
+      deviceInfo: deviceInfo || {},
+      selfieUrl: selfieUrl || null,
+    });
+    res.json(result);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message, code: e.code });
+    next(e);
+  }
+}
+
+export async function attendanceCheckOut(req, res, next) {
+  try {
+    const { staffId, lat, lng } = req.body || {};
+    if (!staffId) return res.status(400).json({ error: 'staffId required' });
+    const record = await checkOut({
+      businessId: tenant(req),
+      staffId,
+      lat: lat != null ? parseFloat(lat) : null,
+      lng: lng != null ? parseFloat(lng) : null,
+    });
+    res.json(record);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message, code: e.code });
+    next(e);
+  }
+}
+
+export async function attendanceCheckInQr(req, res, next) {
+  try {
+    const { qrToken, lat, lng, deviceInfo } = req.body || {};
+    if (!qrToken) return res.status(400).json({ error: 'qrToken required' });
+    const result = await checkInByQr({
+      businessId: tenant(req),
+      qrToken,
+      lat: lat != null ? parseFloat(lat) : null,
+      lng: lng != null ? parseFloat(lng) : null,
+      deviceInfo: deviceInfo || {},
+    });
+    res.json(result);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message, code: e.code });
+    next(e);
+  }
+}
+
+export async function attendanceApprove(req, res, next) {
+  try {
+    const record = await approveAttendance({
+      businessId: tenant(req),
+      recordId: req.params.id,
+      approverId: req.user.userId,
+    });
+    res.json(record);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function listAttendanceHandler(req, res, next) {
+  try {
+    const { date, staffId, locationId, page, pageSize } = req.query;
+    const result = await listAttendance({
+      businessId: tenant(req),
+      date: date || null,
+      staffId: staffId || null,
+      locationId: locationId || null,
+      page: page ? parseInt(page, 10) : 1,
+      pageSize: pageSize ? parseInt(pageSize, 10) : 50,
+    });
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function attendanceDashboardSummary(req, res, next) {
+  try {
+    const { date } = req.query;
+    const result = await getAttendanceDashboardSummary({
+      businessId: tenant(req),
+      date: date || null,
+    });
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function getStaffQrCode(req, res, next) {
+  try {
+    const staff = await generateStaffQrToken({
+      businessId: tenant(req),
+      staffId: req.params.staffId,
+    });
+    res.json(staff);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function manualAttendance(req, res, next) {
+  try {
+    const { staffId, date, status, notes } = req.body || {};
+    if (!staffId || !date || !status) {
+      return res.status(400).json({ error: 'staffId, date, and status required' });
+    }
+    const record = await markManualAttendance({
+      businessId: tenant(req),
+      staffId,
+      date,
+      status,
+      notes: notes || null,
+      createdById: req.user.userId,
+    });
+    res.json(record);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+// ─── Shift Templates ───
+
+export async function listShiftsHandler(req, res, next) {
+  try { res.json(await listShifts(tenant(req))); }
+  catch (e) { next(e); }
+}
+
+export async function createShiftHandler(req, res, next) {
+  try {
+    const { name, type, startTime, endTime, splitStartTime2, splitEndTime2, breakMinutes, graceLateMinutes } = req.body || {};
+    if (!name || !startTime || !endTime) return res.status(400).json({ error: 'name, startTime, endTime required' });
+    const shift = await createShift({ businessId: tenant(req), name, type, startTime, endTime, splitStartTime2, splitEndTime2, breakMinutes, graceLateMinutes });
+    res.status(201).json(shift);
+  } catch (e) { next(e); }
+}
+
+export async function updateShiftHandler(req, res, next) {
+  try {
+    const shift = await updateShift({ businessId: tenant(req), shiftId: req.params.id, ...req.body });
+    res.json(shift);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function deleteShiftHandler(req, res, next) {
+  try {
+    await deleteShift({ businessId: tenant(req), shiftId: req.params.id });
+    res.status(204).send();
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+// ─── Shift Assignments ───
+
+export async function listShiftAssignmentsHandler(req, res, next) {
+  try {
+    const { staffId } = req.query;
+    res.json(await listStaffShiftAssignments({ businessId: tenant(req), staffId: staffId || null }));
+  } catch (e) { next(e); }
+}
+
+export async function assignShiftHandler(req, res, next) {
+  try {
+    const { staffId, shiftId, effectiveFrom, effectiveTo, rotationCycleDay } = req.body || {};
+    if (!staffId || !shiftId || !effectiveFrom) return res.status(400).json({ error: 'staffId, shiftId, effectiveFrom required' });
+    const assignment = await assignShift({ businessId: tenant(req), staffId, shiftId, effectiveFrom, effectiveTo, rotationCycleDay });
+    res.status(201).json(assignment);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function deleteShiftAssignmentHandler(req, res, next) {
+  try {
+    await deleteShiftAssignment({ businessId: tenant(req), assignmentId: req.params.id });
+    res.status(204).send();
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+// ─── Attendance Reports ───
+
+export async function dailyAttendanceReportHandler(req, res, next) {
+  try {
+    const { date, locationId } = req.query;
+    if (!date) return res.status(400).json({ error: 'date required (YYYY-MM-DD)' });
+    const rows = await getDailyAttendanceReport({ businessId: tenant(req), date, locationId: locationId || null });
+    res.json(rows);
+  } catch (e) { next(e); }
+}
+
+export async function monthlyAttendanceReportHandler(req, res, next) {
+  try {
+    const { year, month, staffId } = req.query;
+    if (!year || !month) return res.status(400).json({ error: 'year and month required' });
+    const rows = await getMonthlyAttendanceReport({
+      businessId: tenant(req),
+      year: parseInt(year, 10),
+      month: parseInt(month, 10),
+      staffId: staffId || null,
+    });
+    res.json(rows);
+  } catch (e) { next(e); }
+}
+
+export async function lateArrivalReportHandler(req, res, next) {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
+    const rows = await getLateArrivalReport({ businessId: tenant(req), from, to });
+    res.json(rows);
+  } catch (e) { next(e); }
+}
+
+export async function overtimeReportHandler(req, res, next) {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from and to dates required' });
+    const rows = await getOvertimeReport({ businessId: tenant(req), from, to });
+    res.json(rows);
+  } catch (e) { next(e); }
+}
+
+// ─── Commission Rules ───
+
+export async function listCommissionRulesHandler(req, res, next) {
+  try { res.json(await listCommissionRules(tenant(req))); }
+  catch (e) { next(e); }
+}
+
+export async function createCommissionRuleHandler(req, res, next) {
+  try {
+    const { type, value, staffId, serviceId, tierSlabs, teamManagerId, priority } = req.body || {};
+    if (!type) return res.status(400).json({ error: 'type required' });
+    const rule = await createCommissionRule({ businessId: tenant(req), staffId, serviceId, type, value, tierSlabs, teamManagerId, priority });
+    res.status(201).json(rule);
+  } catch (e) { next(e); }
+}
+
+export async function updateCommissionRuleHandler(req, res, next) {
+  try {
+    const rule = await updateCommissionRule({ businessId: tenant(req), ruleId: req.params.id, ...req.body });
+    res.json(rule);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function deleteCommissionRuleHandler(req, res, next) {
+  try {
+    await deleteCommissionRule({ businessId: tenant(req), ruleId: req.params.id });
+    res.status(204).send();
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+// ─── Commission Records ───
+
+export async function listCommissionsHandler(req, res, next) {
+  try {
+    const { staffId, status, from, to, page, pageSize } = req.query;
+    const result = await listCommissionRecords({
+      businessId: tenant(req),
+      staffId: staffId || null,
+      status: status || null,
+      from: from || null,
+      to: to || null,
+      page: page ? parseInt(page, 10) : 1,
+      pageSize: pageSize ? parseInt(pageSize, 10) : 50,
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+}
+
+export async function commissionSummaryHandler(req, res, next) {
+  try {
+    const { staffId, period } = req.query;
+    res.json(await getCommissionSummary({ businessId: tenant(req), staffId: staffId || null, period: period || 'monthly' }));
+  } catch (e) { next(e); }
+}
+
+export async function commissionLeaderboardHandler(req, res, next) {
+  try {
+    const { from, to } = req.query;
+    const now = new Date();
+    const defaultFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const defaultTo = now.toISOString();
+    res.json(await getCommissionLeaderboard({ businessId: tenant(req), from: from || defaultFrom, to: to || defaultTo }));
+  } catch (e) { next(e); }
+}
+
+export async function approveCommissionsHandler(req, res, next) {
+  try {
+    const { ids } = req.body || {};
+    const result = await approveCommissions({ businessId: tenant(req), ids, approverId: req.user.userId });
+    res.json(result);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function markCommissionsPaidHandler(req, res, next) {
+  try {
+    const { ids, paymentBatchId } = req.body || {};
+    const result = await markCommissionsPaid({ businessId: tenant(req), ids, paymentBatchId });
+    res.json(result);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+// ─── Payroll handlers ─────────────────────────────────────────────────────────
+
+export async function getPayrollConfigHandler(req, res, next) {
+  try {
+    res.json(await getPayrollConfig(tenant(req)));
+  } catch (e) { next(e); }
+}
+
+export async function updatePayrollConfigHandler(req, res, next) {
+  try {
+    const { frequency, payDay, cutoffDay, overtimeRatePerHour } = req.body || {};
+    const fields = {};
+    if (frequency !== undefined) fields.frequency = frequency;
+    if (payDay !== undefined) fields.payDay = Number(payDay);
+    if (cutoffDay !== undefined) fields.cutoffDay = Number(cutoffDay);
+    if (overtimeRatePerHour !== undefined) fields.overtimeRatePerHour = Number(overtimeRatePerHour);
+    res.json(await updatePayrollConfig(tenant(req), fields));
+  } catch (e) { next(e); }
+}
+
+export async function listStaffPayrollConfigsHandler(req, res, next) {
+  try {
+    res.json(await listStaffPayrollConfigs(tenant(req)));
+  } catch (e) { next(e); }
+}
+
+export async function upsertStaffPayrollConfigHandler(req, res, next) {
+  try {
+    const { staffId } = req.params;
+    res.json(await upsertStaffPayrollConfig(tenant(req), staffId, req.body || {}));
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function generatePayrollRunHandler(req, res, next) {
+  try {
+    const { periodStart, periodEnd, bonusMap } = req.body || {};
+    res.status(201).json(await generatePayrollRun(tenant(req), { periodStart, periodEnd, bonusMap }));
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function listPayrollRunsHandler(req, res, next) {
+  try {
+    const { page, pageSize } = req.query;
+    res.json(await listPayrollRuns(tenant(req), {
+      page: page ? Number(page) : 1,
+      pageSize: pageSize ? Number(pageSize) : 20,
+    }));
+  } catch (e) { next(e); }
+}
+
+export async function getPayrollRunHandler(req, res, next) {
+  try {
+    res.json(await getPayrollRun(tenant(req), req.params.runId));
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function payrollSummaryHandler(req, res, next) {
+  try {
+    res.json(await getPayrollSummary(tenant(req), req.params.runId));
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function finalizePayrollRunHandler(req, res, next) {
+  try {
+    res.json(await finalizePayrollRun(tenant(req), req.params.runId));
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function markPayrollRunPaidHandler(req, res, next) {
+  try {
+    res.json(await markPayrollRunPaid(tenant(req), req.params.runId));
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function updatePayrollEntryHandler(req, res, next) {
+  try {
+    res.json(await updatePayrollEntry(tenant(req), req.params.entryId, req.body || {}));
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function salarySlipPdfHandler(req, res, next) {
+  try {
+    const { runId, staffId } = req.params;
+    const pdfBuffer = await generateSalarySlipPdf(tenant(req), runId, staffId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="salary-slip-${staffId}.pdf"`,
+      'Content-Length': pdfBuffer.length,
+    });
+    res.send(pdfBuffer);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
+  }
+}
+
+export async function bankTransferExportHandler(req, res, next) {
+  try {
+    const csv = await exportBankTransferFile(tenant(req), req.params.runId);
+    res.set({
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="bank-transfer-${req.params.runId}.csv"`,
+    });
+    res.send(csv);
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    next(e);
   }
 }

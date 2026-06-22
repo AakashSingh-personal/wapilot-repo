@@ -117,4 +117,67 @@ router.get('/scheduling/public-booking/link', scheduling.getPublicBookingLink);
 
 router.post('/scheduling/calendar/apple/connect', scheduling.connectAppleCalendarHandler);
 
+// ─── Attendance / Geo Check-In ───
+router.post('/scheduling/attendance/checkin', scheduling.attendanceCheckIn);
+router.post('/scheduling/attendance/checkout', scheduling.attendanceCheckOut);
+router.post('/scheduling/attendance/checkin/qr', scheduling.attendanceCheckInQr);
+router.post('/scheduling/attendance/manual', scheduling.manualAttendance);
+router.patch('/scheduling/attendance/:id/approve', scheduling.attendanceApprove);
+router.get('/scheduling/attendance', scheduling.listAttendanceHandler);
+router.get('/scheduling/attendance/dashboard', scheduling.attendanceDashboardSummary);
+router.post('/scheduling/staff/:staffId/qr-token', scheduling.getStaffQrCode);
+
+// ─── Shift Templates ───
+router.get('/scheduling/shifts', scheduling.listShiftsHandler);
+router.post('/scheduling/shifts', scheduling.createShiftHandler);
+router.patch('/scheduling/shifts/:id', scheduling.updateShiftHandler);
+router.delete('/scheduling/shifts/:id', scheduling.deleteShiftHandler);
+
+// ─── Shift Assignments ───
+router.get('/scheduling/shift-assignments', scheduling.listShiftAssignmentsHandler);
+router.post('/scheduling/shift-assignments', scheduling.assignShiftHandler);
+router.delete('/scheduling/shift-assignments/:id', scheduling.deleteShiftAssignmentHandler);
+
+// ─── Attendance Reports ───
+router.get('/scheduling/reports/attendance/daily', scheduling.dailyAttendanceReportHandler);
+router.get('/scheduling/reports/attendance/monthly', scheduling.monthlyAttendanceReportHandler);
+router.get('/scheduling/reports/attendance/late-arrivals', scheduling.lateArrivalReportHandler);
+router.get('/scheduling/reports/attendance/overtime', scheduling.overtimeReportHandler);
+
+// ─── Commission Rules ───
+router.get('/scheduling/commission-rules', scheduling.listCommissionRulesHandler);
+router.post('/scheduling/commission-rules', scheduling.createCommissionRuleHandler);
+router.patch('/scheduling/commission-rules/:id', scheduling.updateCommissionRuleHandler);
+router.delete('/scheduling/commission-rules/:id', scheduling.deleteCommissionRuleHandler);
+
+// ─── Commission Records ───
+router.get('/scheduling/commissions', scheduling.listCommissionsHandler);
+router.get('/scheduling/commissions/summary', scheduling.commissionSummaryHandler);
+router.get('/scheduling/commissions/leaderboard', scheduling.commissionLeaderboardHandler);
+router.post('/scheduling/commissions/approve', scheduling.approveCommissionsHandler);
+router.post('/scheduling/commissions/mark-paid', scheduling.markCommissionsPaidHandler);
+
+// ─── Payroll Config ───
+router.get('/scheduling/payroll/config', scheduling.getPayrollConfigHandler);
+router.patch('/scheduling/payroll/config', scheduling.updatePayrollConfigHandler);
+
+// ─── Staff Salary Config ───
+router.get('/scheduling/payroll/staff-configs', scheduling.listStaffPayrollConfigsHandler);
+router.put('/scheduling/payroll/staff-configs/:staffId', scheduling.upsertStaffPayrollConfigHandler);
+
+// ─── Payroll Runs ───
+router.get('/scheduling/payroll/runs', scheduling.listPayrollRunsHandler);
+router.post('/scheduling/payroll/runs', scheduling.generatePayrollRunHandler);
+router.get('/scheduling/payroll/runs/:runId', scheduling.getPayrollRunHandler);
+router.get('/scheduling/payroll/runs/:runId/summary', scheduling.payrollSummaryHandler);
+router.post('/scheduling/payroll/runs/:runId/finalize', scheduling.finalizePayrollRunHandler);
+router.post('/scheduling/payroll/runs/:runId/mark-paid', scheduling.markPayrollRunPaidHandler);
+router.get('/scheduling/payroll/runs/:runId/export-bank', scheduling.bankTransferExportHandler);
+
+// ─── Payroll Entries ───
+router.patch('/scheduling/payroll/entries/:entryId', scheduling.updatePayrollEntryHandler);
+
+// ─── Salary Slips ───
+router.get('/scheduling/payroll/runs/:runId/slip/:staffId', scheduling.salarySlipPdfHandler);
+
 export default router;
