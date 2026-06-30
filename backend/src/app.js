@@ -50,8 +50,10 @@ export function createApp() {
 
   app.use('/auth', authRoutes);
   app.use('/dashboard', dashboardRoutes);
-  app.use('/', schedulingRoutes);
+  // API routes before scheduling: scheduling applies authMiddleware to all unmatched
+  // paths under /, which would block unauthenticated public endpoints like /public/legal.
   app.use('/', apiRoutes);
+  app.use('/', schedulingRoutes);
 
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
