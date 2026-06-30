@@ -7,7 +7,6 @@
     "node": "20.x",
     "npm": ">=10"
   },
-  "packageManager": "npm@11.16.0",
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
