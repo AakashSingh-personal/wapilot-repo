@@ -99,8 +99,7 @@ export async function runSchedulingLlmTurn({
 
   try {
     for (let round = 0; round < 4; round += 1) {
-      const completion = await llm.client.chat.completions.create({
-        model: llm.model,
+      const completion = await llm.chatCompletion({
         messages,
         tools: SCHEDULING_TOOLS,
         tool_choice: 'auto',

@@ -1,22 +1,34 @@
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { log } from '../utils/logger.js';
+import { anthropicChatCompletion } from './llmAnthropic.adapter.js';
 
-/** @returns {'groq' | 'openai' | null} */
+/** @returns {'groq' | 'openai' | 'claude' | null} */
 function resolveProvider() {
   const explicit = (process.env.AI_PROVIDER || '').trim().toLowerCase();
   if (explicit === 'groq') return 'groq';
   if (explicit === 'openai') return 'openai';
+  if (explicit === 'claude' || explicit === 'anthropic') return 'claude';
 
   const hasGroq = Boolean(process.env.GROQ_API_KEY?.trim());
   const hasOpenai = Boolean(process.env.OPENAI_API_KEY?.trim());
-  if (hasGroq && !hasOpenai) return 'groq';
-  if (hasOpenai && !hasGroq) return 'openai';
-  if (hasGroq && hasOpenai) return 'openai';
+  const hasClaude = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+
+  if (hasGroq && !hasOpenai && !hasClaude) return 'groq';
+  if (hasOpenai && !hasGroq && !hasClaude) return 'openai';
+  if (hasClaude && !hasGroq && !hasOpenai) return 'claude';
+  if (hasOpenai) return 'openai';
+  if (hasClaude) return 'claude';
+  if (hasGroq) return 'groq';
 
   return null;
 }
 
-/** @returns {{ client: OpenAI; model: string; provider: 'groq' | 'openai' } | null} */
+function openAiChatCompletion(client, model, opts) {
+  return client.chat.completions.create({ model, ...opts });
+}
+
+/** @returns {{ provider: string; model: string; chatCompletion: Function } | null} */
 export function createLlmClient() {
   const provider = resolveProvider();
   if (!provider) return null;
@@ -28,13 +40,29 @@ export function createLlmClient() {
       return null;
     }
     const model = process.env.GROQ_MODEL?.trim() || 'llama-3.3-70b-versatile';
+    const client = new OpenAI({
+      apiKey: key,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
     return {
       provider: 'groq',
       model,
-      client: new OpenAI({
-        apiKey: key,
-        baseURL: 'https://api.groq.com/openai/v1',
-      }),
+      chatCompletion: (opts) => openAiChatCompletion(client, model, opts),
+    };
+  }
+
+  if (provider === 'claude') {
+    const key = process.env.ANTHROPIC_API_KEY?.trim();
+    if (!key) {
+      log('warn', 'ai_claude_selected_but_missing_key');
+      return null;
+    }
+    const model = process.env.CLAUDE_MODEL?.trim() || 'claude-opus-4-8';
+    const client = new Anthropic({ apiKey: key });
+    return {
+      provider: 'claude',
+      model,
+      chatCompletion: (opts) => anthropicChatCompletion(client, model, opts),
     };
   }
 
@@ -44,10 +72,11 @@ export function createLlmClient() {
     return null;
   }
   const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini';
+  const client = new OpenAI({ apiKey: key });
   return {
     provider: 'openai',
     model,
-    client: new OpenAI({ apiKey: key }),
+    chatCompletion: (opts) => openAiChatCompletion(client, model, opts),
   };
 }
 
@@ -95,8 +124,7 @@ Customer message: ${message}`;
   }
 
   try {
-    const completion = await llm.client.chat.completions.create({
-      model: llm.model,
+    const completion = await llm.chatCompletion({
       messages: [
         { role: 'system', content: 'You are a concise WhatsApp assistant for Indian small businesses.' },
         { role: 'user', content: prompt },
