@@ -158,6 +158,16 @@ export default function Login() {
               Contact sales
             </Link>
           </p>
+
+          <p className="text-center text-xs text-neutral-400 dark:text-neutral-500 mt-4">
+            <Link to="/privacy-policy" className="hover:text-brand-600 dark:hover:text-brand-400">
+              Privacy Policy
+            </Link>
+            <span className="mx-2">·</span>
+            <Link to="/terms-of-service" className="hover:text-brand-600 dark:hover:text-brand-400">
+              Terms of Service
+            </Link>
+          </p>
         </div>
       </div>
     </div>
