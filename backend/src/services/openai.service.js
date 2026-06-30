@@ -2,6 +2,10 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { log } from '../utils/logger.js';
 import { anthropicChatCompletion } from './llmAnthropic.adapter.js';
+import {
+  buildBusinessUserPrompt,
+  buildWhatsAppAssistantSystemPrompt,
+} from './aiReplyPrompt.js';
 
 /** @returns {'groq' | 'openai' | 'claude' | null} */
 function resolveProvider() {
@@ -100,6 +104,7 @@ export async function generateAIReply(message, businessConfig) {
     productsText = '[]';
   }
   const clientDetails = String(businessConfig.clientDetails || '').trim();
+  const workingHours = String(businessConfig.workingHours || '').trim();
   const history = Array.isArray(businessConfig.conversationHistory)
     ? businessConfig.conversationHistory
         .slice(-12)
@@ -107,15 +112,15 @@ export async function generateAIReply(message, businessConfig) {
         .join('\n')
     : '';
 
-  const prompt = `You are a WhatsApp assistant for an Indian SMB "${businessConfig.businessName}".
-Reply in Hinglish or English. Keep it under 2 lines. Be helpful, polite, and clear.
-Business/client details: ${clientDetails || 'Not provided'}
-Use only these services (JSON): ${servicesText}
-Use only these products (JSON): ${productsText}
-Previous conversation (latest context, use this to stay in context):
-${history || 'No prior context available.'}
-If details are missing, ask one concise follow-up question.
-Customer message: ${message}`;
+  const prompt = buildBusinessUserPrompt({
+    businessName: businessConfig.businessName,
+    message,
+    clientDetails,
+    servicesText,
+    productsText,
+    workingHours,
+    history,
+  });
 
   const llm = createLlmClient();
   if (!llm) {
@@ -126,11 +131,11 @@ Customer message: ${message}`;
   try {
     const completion = await llm.chatCompletion({
       messages: [
-        { role: 'system', content: 'You are a concise WhatsApp assistant for Indian small businesses.' },
+        { role: 'system', content: buildWhatsAppAssistantSystemPrompt() },
         { role: 'user', content: prompt },
       ],
       max_tokens: 120,
-      temperature: 0.6,
+      temperature: 0.2,
     });
     const text = completion.choices[0]?.message?.content?.trim();
     return text || 'Thanks! We will get back to you shortly.';

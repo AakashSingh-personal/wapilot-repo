@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { createLlmClient } from '../services/openai.service.js';
+import { buildSchedulingAssistantRules } from '../services/aiReplyPrompt.js';
 import { log } from '../utils/logger.js';
 import {
   SCHEDULING_TOOLS,
@@ -78,13 +79,14 @@ export async function runSchedulingLlmTurn({
   const today = new Date().toISOString().slice(0, 10);
   const systemPrompt = [
     `You are the appointment scheduling assistant for "${business.name}" on WhatsApp.`,
-    `Today is ${today} (UTC date). Reply in Hinglish or English — concise, friendly, under 4 lines.`,
+    buildSchedulingAssistantRules(),
+    `Today is ${today} (UTC date).`,
     `Services: ${services.map((s) => `${s.name} (${s.durationMin}m, ₹${s.price})`).join('; ') || 'none configured'}.`,
     sessionState?.step
       ? `Active session step: ${sessionState.step}. If customer sends a slot number during booking/reschedule, use rule-based flow (do not call tools).`
       : 'No active slot-selection session.',
     'Use tools for availability, booking slot offers, cancel, reschedule, waitlist, and payments.',
-    'After offer_booking_slots or start_reschedule, tell the customer to reply with a slot number.',
+    'After offer_booking_slots or start_reschedule, tell the customer to reply with a slot number only.',
   ].join('\n');
 
   const messages = [
@@ -104,7 +106,7 @@ export async function runSchedulingLlmTurn({
         tools: SCHEDULING_TOOLS,
         tool_choice: 'auto',
         max_tokens: 300,
-        temperature: 0.3,
+        temperature: 0.2,
       });
 
       const choice = completion.choices[0]?.message;
