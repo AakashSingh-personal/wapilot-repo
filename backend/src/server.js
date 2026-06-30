@@ -18,7 +18,7 @@ function validateEnv() {
   }
   if (!process.env.WHATSAPP_APP_SECRET) {
     log('warn', 'env_missing_whatsapp_app_secret', {
-      message: 'WHATSAPP_APP_SECRET not set — incoming WhatsApp webhook signatures will not be verified',
+      message: 'WHATSAPP_APP_SECRET not  set — incoming WhatsApp webhook signatures will not be verified',
     });
   }
 }
