@@ -8,9 +8,19 @@ import * as communicationController from '../controllers/communication.controlle
 import * as variablesController from '../controllers/variables.controller.js';
 import * as adminController from '../controllers/admin.controller.js';
 import * as userManagementController from '../controllers/userManagement.controller.js';
+import * as legalController from '../controllers/legal.controller.js';
+import { createPublicRateLimiter } from '../middlewares/publicRateLimit.js';
 import { prisma } from '../lib/prisma.js';
 
 const router = Router();
+
+const publicLegalRateLimit = createPublicRateLimiter({
+  windowMs: Number(process.env.PUBLIC_LEGAL_RATE_WINDOW_MS || 60000),
+  max: Number(process.env.PUBLIC_LEGAL_RATE_MAX || 60),
+  message: 'Too many requests — please try again shortly',
+});
+
+router.get('/public/legal/:slug', publicLegalRateLimit, legalController.getPublicLegal);
 
 router.post('/send-message', authMiddleware, messageController.sendMessage);
 router.post('/create-payment-link', authMiddleware, paymentLinkController.createPaymentLink);
@@ -62,6 +72,10 @@ router.get('/admin/clients', authMiddleware, requireChiefAdmin, adminController.
 router.post('/admin/impersonate', authMiddleware, requireChiefAdmin, adminController.impersonateClient);
 router.post('/admin/return-session', authMiddleware, adminController.returnSession);
 router.post('/admin/ensure-chiefadmin', adminController.ensureChiefAdmin);
+
+router.get('/admin/legal', authMiddleware, requireChiefAdmin, legalController.listAdminLegal);
+router.get('/admin/legal/:slug', authMiddleware, requireChiefAdmin, legalController.getAdminLegal);
+router.put('/admin/legal/:slug', authMiddleware, requireChiefAdmin, legalController.updateAdminLegal);
 
 router.get('/user-management/users', authMiddleware, userManagementController.listUsers);
 router.get('/user-management/clients', authMiddleware, userManagementController.listClients);

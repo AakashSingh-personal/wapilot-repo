@@ -36,8 +36,8 @@ export default function PublicLayout() {
             <Link to="/privacy-policy" className="hover:text-brand-600">
               Privacy Policy
             </Link>
-            <Link to="/terms-and-conditions" className="hover:text-brand-600">
-              Terms & Conditions
+            <Link to="/terms-of-service" className="hover:text-brand-600">
+              Terms of Service
             </Link>
             <Link to="/refund-policy" className="hover:text-brand-600">
               Refund Policy

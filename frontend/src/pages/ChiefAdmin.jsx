@@ -14,6 +14,7 @@ import { Button } from '../components/ui/Button.jsx';
 import { Input } from '../components/ui/Input.jsx';
 import { Avatar } from '../components/ui/Avatar.jsx';
 import { Badge } from '../components/ui/Badge.jsx';
+import LegalPagesAdmin from '../components/LegalPagesAdmin.jsx';
 
 function ResultBox({ data, label }) {
   const [copied, setCopied] = useState('');
@@ -169,6 +170,7 @@ export default function ChiefAdmin() {
     { value: 'clients',  label: 'Clients' },
     { value: 'onboard',  label: 'Onboard Client' },
     { value: 'admins',   label: 'Admins' },
+    { value: 'legal',    label: 'Legal Pages' },
   ];
 
   const filteredClients = useMemo(() => {
@@ -345,6 +347,8 @@ export default function ChiefAdmin() {
           {chiefResult && <ResultBox data={chiefResult} label="ChiefAdmin" />}
         </div>
       )}
+
+      {tab === 'legal' && <LegalPagesAdmin />}
     </div>
   );
 }
