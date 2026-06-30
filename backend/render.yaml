@@ -15,7 +15,7 @@ services:
     runtime: node
     rootDir: backend
     buildCommand: npm ci && npm run build
-    startCommand: npm start
+    startCommand: npm run db:migrate:deploy && npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION

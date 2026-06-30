@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { DEFAULT_LEGAL_DOCUMENTS, LEGAL_SLUGS } from '../data/legalDefaults.js';
+import { log } from '../utils/logger.js';
 
 function normalizeSections(sections) {
   if (!Array.isArray(sections)) return [];
@@ -50,13 +51,29 @@ export function isValidLegalSlug(slug) {
   return LEGAL_SLUGS.includes(slug);
 }
 
+function getStaticLegalDocument(slug) {
+  const defaults = DEFAULT_LEGAL_DOCUMENTS.find((d) => d.slug === slug);
+  if (!defaults || defaults.published === false) return null;
+  const now = new Date();
+  return serializeLegalDocument({
+    ...defaults,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 export async function getPublicLegalDocument(slug) {
-  await ensureLegalDefaults();
+  if (!isValidLegalSlug(slug)) return null;
 
-  const doc = await prisma.legalDocument.findUnique({ where: { slug } });
-  if (!doc || !doc.published) return null;
-
-  return serializeLegalDocument(doc);
+  try {
+    await ensureLegalDefaults();
+    const doc = await prisma.legalDocument.findUnique({ where: { slug } });
+    if (!doc || !doc.published) return getStaticLegalDocument(slug);
+    return serializeLegalDocument(doc);
+  } catch (err) {
+    log('warn', 'legal_db_unavailable', { slug, message: err.message });
+    return getStaticLegalDocument(slug);
+  }
 }
 
 export async function listLegalDocuments() {
