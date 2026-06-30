@@ -1,5 +1,5 @@
 /**
- * WaPilot Design System – JS tokens
+ * Vartalap Design System – JS tokens
  * Mirror of tailwind.config.js values for use in Recharts and dynamic styles.
  */
 

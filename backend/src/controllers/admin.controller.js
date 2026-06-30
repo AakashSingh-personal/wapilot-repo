@@ -52,7 +52,7 @@ export async function ensureChiefAdmin(req, res, next) {
 
     const hash = await bcrypt.hash(password, 12);
     const created = await prisma.$transaction(async (tx) => {
-      const business = await tx.business.create({ data: { name: 'WAPilot HQ' } });
+      const business = await tx.business.create({ data: { name: 'Vartalap HQ' } });
       const user = await tx.user.create({
         data: {
           email,
@@ -147,8 +147,8 @@ export async function onboardClient(req, res, next) {
       try {
         await sendEmail({
           to: email,
-          subject: 'Welcome to WAPilot — your account is ready',
-          text: `Hello${ownerName ? ' ' + ownerName : ''},\n\nYour WAPilot account has been created.\n\nEmail: ${email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
+          subject: 'Welcome to Vartalap — your account is ready',
+          text: `Hello${ownerName ? ' ' + ownerName : ''},\n\nYour Vartalap account has been created.\n\nEmail: ${email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
         });
         return res.status(201).json({ ...onboardPayload, tempPasswordSentViaEmail: true });
       } catch (emailErr) {
@@ -293,7 +293,7 @@ export async function createChiefAdmin(req, res, next) {
       try {
         await sendEmail({
           to: email,
-          subject: 'Your WAPilot ChiefAdmin account',
+          subject: 'Your Vartalap ChiefAdmin account',
           text: `Hello,\n\nA ChiefAdmin account has been created for you.\n\nEmail: ${email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
         });
         return res.status(201).json({ ...chiefPayload, tempPasswordSentViaEmail: true });

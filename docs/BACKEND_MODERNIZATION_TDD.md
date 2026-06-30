@@ -1,4 +1,4 @@
-# WaPilot Backend — Enterprise Modernization Technical Design Document
+# Vartalap Backend — Enterprise Modernization Technical Design Document
 
 > **Version:** 1.0 · **Date:** 2026-06-07 · **Status:** Draft  
 > **Authors:** Architecture Review Board  
@@ -34,7 +34,7 @@
 
 ### 1.1 Current Architecture Assessment
 
-WaPilot is a **multi-tenant SaaS WhatsApp business platform** delivering:
+Vartalap is a **multi-tenant SaaS WhatsApp business platform** delivering:
 - AI-powered WhatsApp inbox and bot (OpenAI/Groq)
 - Appointment scheduling with staff, services, locations, calendar sync (Google, Outlook, Apple)
 - Bulk communication campaigns with wallet billing
@@ -678,7 +678,7 @@ function evaluatePolicy(policy: AccessPolicy): boolean {
 
 ```yaml
 # AWS Secrets Manager hierarchy
-/wapilot/production/
+/vartalap/production/
   database/
     primary-url          # PgBouncer DSN with credentials
     replica-url
@@ -743,7 +743,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      connectSrc: ["'self'", 'wss://api.wapilot.com'],
+      connectSrc: ["'self'", 'wss://api.vartalap.com'],
     },
   },
   hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
@@ -773,9 +773,9 @@ app.use(helmet({
 ### 6.1 URL Convention
 
 ```
-Base:     https://api.wapilot.com/v1
-Webhooks: https://api.wapilot.com/webhook/...  (no version prefix)
-Public:   https://api.wapilot.com/public/v1     (no auth, rate-limited)
+Base:     https://api.vartalap.com/v1
+Webhooks: https://api.vartalap.com/webhook/...  (no version prefix)
+Public:   https://api.vartalap.com/public/v1     (no auth, rate-limited)
 
 Pattern:  /v1/{resource}[/{id}][/{sub-resource}]
 
@@ -1076,7 +1076,7 @@ class RabbitMQConsumer {
     await this.channel.assertQueue(queue, {
       durable: true,
       arguments: {
-        'x-dead-letter-exchange': 'wapilot.dlx',
+        'x-dead-letter-exchange': 'vartalap.dlx',
         'x-dead-letter-routing-key': `${queue}.dead`,
         'x-message-ttl': 3_600_000,  // 1 hour max TTL
       },
@@ -1151,7 +1151,7 @@ import pino from 'pino';
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
   base: {
-    service: 'wapilot-api',
+    service: 'vartalap-api',
     env: process.env.NODE_ENV,
     version: process.env.APP_VERSION,
   },
@@ -1259,7 +1259,7 @@ app.use((req, res, next) => {
 ```yaml
 # Grafana alert rules
 groups:
-  - name: wapilot-api
+  - name: vartalap-api
     rules:
       - alert: HighErrorRate
         expr: rate(http_requests_total{status_code=~"5.."}[5m]) > 0.05
@@ -1287,7 +1287,7 @@ groups:
 ### 10.1 Repository Structure
 
 ```
-wapilot/
+vartalap/
 ├── apps/
 │   ├── api/             # Main application (was backend/)
 │   ├── worker/          # Background job process
@@ -1348,7 +1348,7 @@ jobs:
     needs: build
     if: branch == 'staging'
     steps:
-      - helm upgrade --install wapilot-staging
+      - helm upgrade --install vartalap-staging
       - Run smoke tests
       - Notify Slack
 
@@ -1356,7 +1356,7 @@ jobs:
     needs: build
     if: branch == 'main'
     steps:
-      - helm upgrade --install wapilot-prod (blue-green)
+      - helm upgrade --install vartalap-prod (blue-green)
       - Run smoke + synthetic tests
       - Notify Slack
 ```
@@ -1379,11 +1379,11 @@ FROM node:22-alpine AS production
 WORKDIR /app
 ENV NODE_ENV=production
 # Non-root user
-RUN addgroup -S wapilot && adduser -S wapilot -G wapilot
-COPY --from=build --chown=wapilot:wapilot /app/dist ./dist
-COPY --from=build --chown=wapilot:wapilot /app/node_modules ./node_modules
-COPY --from=build --chown=wapilot:wapilot /app/package.json .
-USER wapilot
+RUN addgroup -S vartalap && adduser -S vartalap -G vartalap
+COPY --from=build --chown=vartalap:vartalap /app/dist ./dist
+COPY --from=build --chown=vartalap:vartalap /app/node_modules ./node_modules
+COPY --from=build --chown=vartalap:vartalap /app/package.json .
+USER vartalap
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s CMD curl -f http://localhost:3000/health
 CMD ["node", "dist/server.js"]
@@ -1392,11 +1392,11 @@ CMD ["node", "dist/server.js"]
 ### 10.5 Kubernetes / Helm
 
 ```yaml
-# infrastructure/helm/wapilot/values.yaml
+# infrastructure/helm/vartalap/values.yaml
 api:
   replicaCount: 3
   image:
-    repository: 123456789.dkr.ecr.ap-south-1.amazonaws.com/wapilot-api
+    repository: 123456789.dkr.ecr.ap-south-1.amazonaws.com/vartalap-api
     tag: latest
   resources:
     requests: { cpu: 250m, memory: 256Mi }
@@ -1883,7 +1883,7 @@ describe('Appointment creation (integration)', () => {
 // Consumer-driven contract tests with Pact
 // Verify: WhatsApp webhook payload shape won't break processing
 const whatsappWebhookProvider = new Pact({
-  consumer: 'wapilot-api',
+  consumer: 'vartalap-api',
   provider: 'meta-whatsapp-api',
 });
 
@@ -2189,11 +2189,11 @@ CREATE INDEX idx_conversation_embeddings_hnsw
 
 ```
 ==============================================================================
-MASTER IMPLEMENTATION PROMPT — WAPILOT BACKEND MODERNIZATION
+MASTER IMPLEMENTATION PROMPT — VARTALAP BACKEND MODERNIZATION
 Use with: Claude Code, Cursor, Windsurf, GitHub Copilot Agent, Aider
 ==============================================================================
 
-You are implementing a production-grade Node.js/TypeScript backend for WaPilot,
+You are implementing a production-grade Node.js/TypeScript backend for Vartalap,
 a multi-tenant WhatsApp business platform. The existing backend is in
 `backend/src/` (JavaScript, Express, Prisma). You are rebuilding it
 incrementally in `apps/api/` following the architecture defined in

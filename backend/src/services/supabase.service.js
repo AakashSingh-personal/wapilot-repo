@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-const DEFAULT_BUCKET = process.env.SUPABASE_MEDIA_BUCKET || 'wapilot-media';
+const DEFAULT_BUCKET = process.env.SUPABASE_MEDIA_BUCKET || 'vartalap-media';
 
 let cached = null;
 

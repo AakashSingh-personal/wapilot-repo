@@ -5,11 +5,11 @@ import { startRealtime, stopRealtime } from '../realtime/socket.js';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => sessionStorage.getItem('wapilot_token'));
+  const [token, setToken] = useState(() => sessionStorage.getItem('vartalap_token'));
   const [user, setUser] = useState(null);
   const [business, setBusiness] = useState(null);
   const [bootstrapping, setBootstrapping] = useState(() =>
-    Boolean(sessionStorage.getItem('wapilot_token')),
+    Boolean(sessionStorage.getItem('vartalap_token')),
   );
   // returnToken is kept in memory only (never written to storage) to limit XSS exposure.
   const [returnToken, setReturnToken] = useState(null);

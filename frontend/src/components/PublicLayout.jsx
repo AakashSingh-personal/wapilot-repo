@@ -6,7 +6,7 @@ export default function PublicLayout() {
       <header className="border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link to="/" className="text-lg font-bold text-brand-700 dark:text-brand-400">
-            WAPilot
+            Vartalap
           </Link>
           <nav className="flex items-center gap-4 text-sm">
             <Link to="/pricing" className="text-slate-600 dark:text-slate-300 hover:text-brand-600">
@@ -31,7 +31,7 @@ export default function PublicLayout() {
 
       <footer className="border-t border-slate-200 dark:border-slate-800">
         <div className="max-w-6xl mx-auto px-6 py-6 text-sm text-slate-500 flex flex-wrap gap-4 justify-between">
-          <span>© {new Date().getFullYear()} WAPilot</span>
+          <span>© {new Date().getFullYear()} Vartalap</span>
           <div className="flex gap-4">
             <Link to="/privacy-policy" className="hover:text-brand-600">
               Privacy Policy

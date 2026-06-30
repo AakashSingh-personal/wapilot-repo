@@ -2649,7 +2649,7 @@ export default function Scheduling() {
                     className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
                     value={schedSettings.reminderTemplate || ''}
                     onChange={(e) => setSchedSettings((s) => ({ ...s, reminderTemplate: e.target.value }))}
-                    placeholder="wapilot_appointment_reminder"
+                    placeholder="vartalap_appointment_reminder"
                   />
                 </label>
                 <label className="block text-sm">
@@ -2658,7 +2658,7 @@ export default function Scheduling() {
                     className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
                     value={schedSettings.confirmationTemplate || ''}
                     onChange={(e) => setSchedSettings((s) => ({ ...s, confirmationTemplate: e.target.value }))}
-                    placeholder="wapilot_appointment_confirmed"
+                    placeholder="vartalap_appointment_confirmed"
                   />
                 </label>
                 <label className="block text-sm">
@@ -2667,7 +2667,7 @@ export default function Scheduling() {
                     className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
                     value={schedSettings.rebookingTemplate || ''}
                     onChange={(e) => setSchedSettings((s) => ({ ...s, rebookingTemplate: e.target.value }))}
-                    placeholder="wapilot_rebooking_nudge"
+                    placeholder="vartalap_rebooking_nudge"
                   />
                 </label>
                 <label className="block text-sm">

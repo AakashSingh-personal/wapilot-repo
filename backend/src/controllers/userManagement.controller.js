@@ -120,8 +120,8 @@ export async function createUser(req, res, next) {
       try {
         await sendEmail({
           to: email,
-          subject: 'Your WAPilot account has been created',
-          text: `Hello,\n\nAn account has been created for you on WAPilot.\n\nEmail: ${email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
+          subject: 'Your Vartalap account has been created',
+          text: `Hello,\n\nAn account has been created for you on Vartalap.\n\nEmail: ${email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
         });
         return res.status(201).json({ user: userPayload, tempPasswordSentViaEmail: true });
       } catch (emailErr) {
@@ -178,7 +178,7 @@ export async function resetUserPassword(req, res, next) {
       try {
         await sendEmail({
           to: target.email,
-          subject: 'Your WAPilot password has been reset',
+          subject: 'Your Vartalap password has been reset',
           text: `Hello,\n\nYour password has been reset.\n\nEmail: ${target.email}\nTemporary password: ${tempPassword}\n\nPlease log in and change your password immediately.\n`,
         });
         return res.json({ ...resetPayload, tempPasswordSentViaEmail: true });

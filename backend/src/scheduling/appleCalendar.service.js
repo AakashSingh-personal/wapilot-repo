@@ -104,7 +104,7 @@ export async function pushAppointmentToApple(appointment) {
   try {
     const client = await createAppleClient(conn);
     const calendarUrl = await resolveCalendarHref(conn);
-    const uid = appointment.calendarEventId || `${appointment.id}@wapilot.app`;
+    const uid = appointment.calendarEventId || `${appointment.id}@vartalap.app`;
     const summary = `${appointment.service?.name || 'Appointment'} — ${appointment.customer?.name || 'Customer'}`;
     const description = [
       `Ref: ${appointment.appointmentNumber}`,
@@ -114,7 +114,7 @@ export async function pushAppointmentToApple(appointment) {
     const ics = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//WAPilot//Scheduling//EN',
+      'PRODID:-//Vartalap//Scheduling//EN',
       'BEGIN:VEVENT',
       `UID:${uid}`,
       `DTSTART:${formatIcsUtc(appointment.startAt)}`,

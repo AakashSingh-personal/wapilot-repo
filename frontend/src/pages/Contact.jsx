@@ -8,7 +8,7 @@ export default function Contact() {
 
       <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-2">
         <p>
-          <span className="font-semibold">Email:</span> support@wapilot.in
+          <span className="font-semibold">Email:</span> support@vartalap.in
         </p>
         <p>
           <span className="font-semibold">Phone:</span> +91 90000 00000

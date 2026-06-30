@@ -8,7 +8,7 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('wapilot_token');
+  const token = sessionStorage.getItem('vartalap_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -16,6 +16,6 @@ api.interceptors.request.use((config) => {
 });
 
 export function setAuthToken(token) {
-  if (token) sessionStorage.setItem('wapilot_token', token);
-  else sessionStorage.removeItem('wapilot_token');
+  if (token) sessionStorage.setItem('vartalap_token', token);
+  else sessionStorage.removeItem('vartalap_token');
 }

@@ -327,7 +327,7 @@ function outlookWebhookClientState(connectionId) {
     process.env.OUTLOOK_WEBHOOK_SECRET ||
     process.env.CALENDAR_TOKEN_SECRET ||
     process.env.JWT_SECRET ||
-    'wapilot';
+    'vartalap';
   return crypto.createHmac('sha256', secret).update(connectionId).digest('hex').slice(0, 32);
 }
 

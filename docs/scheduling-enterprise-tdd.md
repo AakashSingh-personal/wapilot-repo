@@ -1,8 +1,8 @@
-# WAPilot — Staff Scheduling & Appointment Booking
+# Vartalap — Staff Scheduling & Appointment Booking
 ## Enterprise Technical Design Document (As-Built + Target Architecture)
 
 **Version:** 2.0  
-**Product:** WAPilot  
+**Product:** Vartalap  
 **Module:** Staff Scheduling & Appointment Booking  
 **Status:** Implementation-ready (Express monolith deployed; microservices optional Phase 5)  
 **Companion:** [`scheduling-tdd.md`](./scheduling-tdd.md) — quick as-built reference
@@ -43,7 +43,7 @@
 
 ## Stack note (spec vs as-built)
 
-| Layer | Original enterprise spec | **WAPilot as-built** |
+| Layer | Original enterprise spec | **Vartalap as-built** |
 |-------|-------------------------|----------------------|
 | Backend | Spring Boot | **Node.js 20+ / Express 4** |
 | ORM | JPA | **Prisma 6.19** |
@@ -69,7 +69,7 @@
 └────────────┬───────────────────────────────┬────────────────────────────────┘
              │ REST + JWT                     │ Meta Webhook
              ▼                                ▼
-┌──────────────────────────── WAPilot API (Express Monolith) ─────────────────┐
+┌──────────────────────────── Vartalap API (Express Monolith) ─────────────────┐
 │  scheduling.routes.js → scheduling.controller.js                             │
 │  ┌─────────────┐ ┌──────────────┐ ┌─────────────┐ ┌──────────────────────┐  │
 │  │ Appointment │ │ Slot/Avail   │ │ Calendar    │ │ AI Booking           │  │
@@ -623,7 +623,7 @@ Webhook (Google/Outlook)
 | Scenario | Resolution |
 |----------|------------|
 | External calendar busy | Block slot in availability engine |
-| WAPilot books slot | Push event; store external ID |
+| Vartalap books slot | Push event; store external ID |
 | External event deleted | Next pull removes block |
 | Duplicate push | Upsert by AppointmentCalendarEvent |
 | Reschedule | Delete old external events → create new |
@@ -648,7 +648,7 @@ Webhook (Google/Outlook)
 |-------|----------------|
 | API | JWT middleware rejects cross-tenant IDs |
 | Database | FK + indexes on businessId; **no RLS yet** (Phase 5) |
-| Cache | Redis keys prefixed `wapilot:slot:{businessId}:…` |
+| Cache | Redis keys prefixed `vartalap:slot:{businessId}:…` |
 | Idempotency | Unique `(businessId, idempotencyKey)` |
 | Settings | `BusinessConfig.schedulingSettings` JSON per tenant |
 | Calendar | Connections scoped by businessId |
@@ -754,7 +754,7 @@ Started in `server.js`:
 ### 15.2 Target (RabbitMQ — Phase 5)
 
 ```
-Exchange: wapilot.scheduling (topic)
+Exchange: vartalap.scheduling (topic)
 
 Queues:
   scheduling.reminder.dispatch    ← appointment.confirmed
@@ -782,7 +782,7 @@ Dead letter: scheduling.dlq
 
 ## 16. WebSocket Events
 
-**Channel:** Redis `REDIS_REALTIME_CHANNEL` (default `wapilot:realtime`)
+**Channel:** Redis `REDIS_REALTIME_CHANNEL` (default `vartalap:realtime`)
 
 | Event type | Trigger | Payload |
 |------------|---------|---------|
@@ -1178,7 +1178,7 @@ See [`backend/.env.example`](../backend/.env.example):
 ## Appendix B — Folder structure
 
 ```
-wapilot-repo/
+vartalap-repo/
 ├── backend/
 │   ├── prisma/schema.prisma
 │   ├── prisma/migrations/
@@ -1214,7 +1214,7 @@ wapilot-repo/
 
 1. **API**: Run multiple `node src/server.js` instances behind a load balancer. Set `WORKER_ENABLE=false` on API pods when workers run separately.
 2. **Workers (same deployment)**: Default `WORKER_ENABLE=true` — reminders, waitlist, calendar sync, and rebooking run in the API process (poll or RabbitMQ).
-3. **Workers (separate deployment)**: Set `WORKER_ENABLE=false` on API and run `npm run worker` (sets `WORKER_STANDALONE=true`). With RabbitMQ, exchange `wapilot.scheduling` and queues auto-create on connect.
+3. **Workers (separate deployment)**: Set `WORKER_ENABLE=false` on API and run `npm run worker` (sets `WORKER_STANDALONE=true`). With RabbitMQ, exchange `vartalap.scheduling` and queues auto-create on connect.
 4. **Redis**: Required shared instance for slot locks and WebSocket pub/sub.
 5. **PostgreSQL**: Use PgBouncer in transaction mode; apply RLS migration and enable `SCHEDULING_RLS_ENABLED=1` for defense in depth.
 6. **Rate limits**: In-memory limiter is per-instance; use edge WAF or Redis limiter at scale.

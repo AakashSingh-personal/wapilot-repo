@@ -89,7 +89,7 @@ async function createSubscriptionPaymentLink(businessId, userEmail) {
 
   const paymentLink = await createRazorpayPaymentLink({
     amountInInr: amt,
-    description: 'WAPilot PRO subscription',
+    description: 'Vartalap PRO subscription',
     customer: userEmail ? { email: userEmail } : {},
     notes: {
       kind: 'subscription',

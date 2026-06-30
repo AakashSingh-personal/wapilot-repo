@@ -43,7 +43,7 @@ export default function Login() {
           <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
             <MessageSquare className="w-5 h-5 text-white" />
           </div>
-          <span className="text-xl font-bold text-white">WaPilot</span>
+          <span className="text-xl font-bold text-white">Vartalap</span>
         </div>
 
         <div className="relative z-10 space-y-4">
@@ -73,7 +73,7 @@ export default function Login() {
         </div>
 
         <div className="relative z-10 text-brand-200 text-xs">
-          © {new Date().getFullYear()} WaPilot. All rights reserved.
+          © {new Date().getFullYear()} Vartalap. All rights reserved.
         </div>
       </div>
 
@@ -85,7 +85,7 @@ export default function Login() {
             <div className="w-8 h-8 rounded-xl bg-brand-600 flex items-center justify-center">
               <MessageSquare className="w-4 h-4 text-white" />
             </div>
-            <span className="text-lg font-bold text-neutral-900 dark:text-neutral-50">WaPilot</span>
+            <span className="text-lg font-bold text-neutral-900 dark:text-neutral-50">Vartalap</span>
           </div>
 
           <div className="mb-8">

@@ -2,7 +2,7 @@ import Redis from 'ioredis';
 import * as hub from './hub.js';
 import { log } from '../utils/logger.js';
 
-const CHANNEL = process.env.REDIS_REALTIME_CHANNEL || 'wapilot:realtime';
+const CHANNEL = process.env.REDIS_REALTIME_CHANNEL || 'vartalap:realtime';
 
 /**
  * Many env panels paste `redis-cli -u redis://...` or wrap the URI in spaces / quotes.

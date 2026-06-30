@@ -3,13 +3,13 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 const ThemeContext = createContext(null);
 
 export function ThemeProvider({ children }) {
-  const [theme, setThemeState] = useState(() => localStorage.getItem('wapilot_theme') || 'light');
+  const [theme, setThemeState] = useState(() => localStorage.getItem('vartalap_theme') || 'light');
 
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark') root.classList.add('dark');
     else root.classList.remove('dark');
-    localStorage.setItem('wapilot_theme', theme);
+    localStorage.setItem('vartalap_theme', theme);
   }, [theme]);
 
   const toggle = () => setThemeState((t) => (t === 'dark' ? 'light' : 'dark'));

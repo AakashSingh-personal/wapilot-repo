@@ -11,12 +11,12 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
     slug: 'privacy-policy',
     title: 'Privacy Policy',
     intro:
-      'This Privacy Policy describes how WAPilot collects, uses, stores, and protects information when you use our website, dashboard, and related services (collectively, the "Service"). By using WAPilot, you agree to the practices described here.',
+      'This Privacy Policy describes how Vartalap collects, uses, stores, and protects information when you use our website, dashboard, and related services (collectively, the "Service"). By using Vartalap, you agree to the practices described here.',
     sections: [
       {
         title: '1. Who we are',
         paragraphs: [
-          'WAPilot is a WhatsApp-first CRM and business automation platform that helps businesses manage conversations, appointments, campaigns, and payments. For privacy-related requests, contact us at [support@wapilot.in](mailto:support@wapilot.in).',
+          'Vartalap is a WhatsApp-first CRM and business automation platform that helps businesses manage conversations, appointments, campaigns, and payments. For privacy-related requests, contact us at [support@vartalap.in](mailto:support@vartalap.in).',
         ],
       },
       {
@@ -24,7 +24,7 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
         paragraphs: ['We collect information necessary to operate the Service, including:'],
         listItems: [
           '**Account information:** name, email address, business name, role, login credentials, and workspace settings.',
-          '**Customer and contact data you upload:** names, phone numbers, tags, custom fields, conversation history, and other CRM data you choose to store in WAPilot.',
+          '**Customer and contact data you upload:** names, phone numbers, tags, custom fields, conversation history, and other CRM data you choose to store in Vartalap.',
           '**Communication data:** WhatsApp message content, templates, delivery status, campaign records, and related metadata required to send and track messages.',
           '**Scheduling data:** appointments, staff availability, calendar sync details, and reminder preferences.',
           '**Billing and wallet data:** payment references, transaction history, wallet balance, invoices, and usage records for communication credits.',
@@ -51,7 +51,7 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
         title: '4. Legal basis and your responsibilities',
         paragraphs: [
           'Where applicable, we process data to perform our contract with you, pursue legitimate business interests such as security and service improvement, and comply with legal requirements.',
-          'You are responsible for ensuring that you have a lawful basis to collect and process contact data uploaded to WAPilot, including obtaining valid consent where required for WhatsApp and marketing communications.',
+          'You are responsible for ensuring that you have a lawful basis to collect and process contact data uploaded to Vartalap, including obtaining valid consent where required for WhatsApp and marketing communications.',
         ],
       },
       {
@@ -91,7 +91,7 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
           'Request a copy of information in a portable format, where applicable.',
         ],
         trailingParagraphs: [
-          'To exercise these rights, email [support@wapilot.in](mailto:support@wapilot.in) from your registered account email. We may need to verify your identity before fulfilling a request.',
+          'To exercise these rights, email [support@vartalap.in](mailto:support@vartalap.in) from your registered account email. We may need to verify your identity before fulfilling a request.',
         ],
       },
       {
@@ -103,7 +103,7 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
       {
         title: '10. Children',
         paragraphs: [
-          'WAPilot is intended for business use and is not directed to children under 18. We do not knowingly collect personal information from children.',
+          'Vartalap is intended for business use and is not directed to children under 18. We do not knowingly collect personal information from children.',
         ],
       },
       {
@@ -119,18 +119,18 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
     slug: 'terms-of-service',
     title: 'Terms of Service',
     intro:
-      'These Terms of Service ("Terms") govern access to and use of WAPilot\'s website, dashboard, APIs, and related services (collectively, the "Service"). By creating an account or using the Service, you agree to these Terms.',
+      'These Terms of Service ("Terms") govern access to and use of Vartalap\'s website, dashboard, APIs, and related services (collectively, the "Service"). By creating an account or using the Service, you agree to these Terms.',
     sections: [
       {
         title: '1. Eligibility and account access',
         paragraphs: [
-          'WAPilot is a business platform offered to organizations and authorized users. Access is provided on an invite or sales-led onboarding basis unless otherwise stated. You must provide accurate account information and keep your credentials secure.',
+          'Vartalap is a business platform offered to organizations and authorized users. Access is provided on an invite or sales-led onboarding basis unless otherwise stated. You must provide accurate account information and keep your credentials secure.',
           'You are responsible for all activity under your account and for ensuring that users you add to your workspace comply with these Terms.',
         ],
       },
       {
         title: '2. The Service',
-        paragraphs: ['WAPilot provides tools for:'],
+        paragraphs: ['Vartalap provides tools for:'],
         listItems: [
           'WhatsApp conversation management and inbox workflows.',
           'Template creation, submission, and campaign sending.',
@@ -145,7 +145,7 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
       },
       {
         title: '3. Acceptable use',
-        paragraphs: ['You agree not to use WAPilot to:'],
+        paragraphs: ['You agree not to use Vartalap to:'],
         listItems: [
           'Violate applicable laws, regulations, or third-party rights.',
           'Send spam, unsolicited messages, or communications without valid consent.',
@@ -160,7 +160,7 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
       {
         title: '4. WhatsApp and third-party platform compliance',
         paragraphs: [
-          'Use of WhatsApp messaging features is subject to WhatsApp Business policies, Meta platform terms, template approval rules, and messaging limits imposed by those platforms. WAPilot does not control third-party approval decisions, delivery outcomes, or policy enforcement actions taken by Meta or WhatsApp.',
+          'Use of WhatsApp messaging features is subject to WhatsApp Business policies, Meta platform terms, template approval rules, and messaging limits imposed by those platforms. Vartalap does not control third-party approval decisions, delivery outcomes, or policy enforcement actions taken by Meta or WhatsApp.',
           'You are responsible for maintaining an approved WhatsApp Business setup, using approved templates where required, honoring opt-out requests, and complying with regional messaging rules.',
         ],
       },
@@ -181,14 +181,14 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
       {
         title: '7. Customer data and privacy',
         paragraphs: [
-          'You retain ownership of data you upload or generate in your workspace. You grant WAPilot a limited license to host, process, and transmit that data solely to provide and improve the Service.',
+          'You retain ownership of data you upload or generate in your workspace. You grant Vartalap a limited license to host, process, and transmit that data solely to provide and improve the Service.',
           'Our handling of personal information is described in our [Privacy Policy](/privacy-policy).',
         ],
       },
       {
         title: '8. Intellectual property',
         paragraphs: [
-          'WAPilot and its licensors own the Service, software, branding, documentation, and related intellectual property. These Terms do not grant you any rights to our trademarks or proprietary materials except as needed to use the Service.',
+          'Vartalap and its licensors own the Service, software, branding, documentation, and related intellectual property. These Terms do not grant you any rights to our trademarks or proprietary materials except as needed to use the Service.',
         ],
       },
       {
@@ -201,8 +201,8 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
       {
         title: '10. Limitation of liability',
         paragraphs: [
-          'To the maximum extent permitted by law, WAPilot and its affiliates will not be liable for indirect, incidental, special, consequential, or punitive damages, or for loss of profits, revenue, data, or business opportunities arising from use of the Service.',
-          'Our total liability for any claim relating to the Service will not exceed the amount you paid to WAPilot for the Service in the twelve months before the event giving rise to the claim, except where liability cannot be limited by law.',
+          'To the maximum extent permitted by law, Vartalap and its affiliates will not be liable for indirect, incidental, special, consequential, or punitive damages, or for loss of profits, revenue, data, or business opportunities arising from use of the Service.',
+          'Our total liability for any claim relating to the Service will not exceed the amount you paid to Vartalap for the Service in the twelve months before the event giving rise to the claim, except where liability cannot be limited by law.',
         ],
       },
       {
@@ -231,7 +231,7 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
     slug: 'refund-policy',
     title: 'Refund Policy',
     intro:
-      'This Refund Policy explains when wallet top-ups and other payments made to WAPilot may be refunded.',
+      'This Refund Policy explains when wallet top-ups and other payments made to Vartalap may be refunded.',
     sections: [
       {
         title: '1. Refund window',
@@ -261,7 +261,7 @@ export const DEFAULT_LEGAL_DOCUMENTS = [
       {
         title: '5. How to request a refund',
         paragraphs: [
-          'To request a refund, email [support@wapilot.in](mailto:support@wapilot.in) with your payment reference, account email, and reason for the request.',
+          'To request a refund, email [support@vartalap.in](mailto:support@vartalap.in) with your payment reference, account email, and reason for the request.',
         ],
       },
     ],

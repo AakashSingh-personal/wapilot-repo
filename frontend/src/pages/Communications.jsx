@@ -536,7 +536,7 @@ export default function Communications({ forcedTab = null, templateMode = 'combi
       const { data } = await api.post('/wallet/add-money', { amount: Number(addAmount) });
       const rzp = new window.Razorpay({
         key: data.keyId, amount: Math.round(Number(data.amount) * 100),
-        currency: data.currency || 'INR', name: 'WAPilot', description: 'Wallet top-up',
+        currency: data.currency || 'INR', name: 'Vartalap', description: 'Wallet top-up',
         order_id: data.orderId,
         handler: async (resp) => {
           await api.patch(`/wallet/add-money/${data.paymentId}/verify`, {

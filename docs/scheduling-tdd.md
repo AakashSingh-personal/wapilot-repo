@@ -1,4 +1,4 @@
-# Staff Scheduling — Quick Reference (WAPilot)
+# Staff Scheduling — Quick Reference (Vartalap)
 
 > **Full enterprise TDD (25 sections):** [`scheduling-enterprise-tdd.md`](./scheduling-enterprise-tdd.md)  
 > Use the enterprise document for architecture, ER diagrams, API samples, algorithms, acceptance criteria, and development phases.

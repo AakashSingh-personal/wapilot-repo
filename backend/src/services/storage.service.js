@@ -93,7 +93,7 @@ export async function uploadStaffProfileBase64({ businessId, staffId, base64Data
     mimeType,
     fileName: fileName || `staff-${staffId}.jpg`,
     businessId,
-    bucket: process.env.STAFF_PHOTO_BUCKET || process.env.SUPABASE_MEDIA_BUCKET || 'wapilot-media',
+    bucket: process.env.STAFF_PHOTO_BUCKET || process.env.SUPABASE_MEDIA_BUCKET || 'vartalap-media',
   });
   return { publicUrl: uploaded.publicUrl, key: uploaded.path, provider: 'supabase' };
 }

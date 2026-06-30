@@ -1,6 +1,6 @@
-# WAPilot
+# Vartalap
 
-WAPilot is a WhatsApp-first CRM + automation app with:
+Vartalap is a WhatsApp-first CRM + automation app with:
 - A web Conversations inbox (same thread as WhatsApp)
 - WhatsApp template management (create/list/sync statuses)
 - Wallet-based communication credits + transaction history
@@ -40,7 +40,7 @@ Frontend defaults to `http://localhost:5173`.
 
 ## Role-based guide
 
-This section is intended for different teams using WAPilot.
+This section is intended for different teams using Vartalap.
 
 ### Product (PM / Ops)
 
@@ -175,7 +175,7 @@ This allows client teams to manage users without leaving Settings.
   - shows a loader while waiting for the API response
 
 #### Meta status display
-Meta’s UI often shows “In review” while the Meta API returns `PENDING`. In WAPilot we display:
+Meta’s UI often shows “In review” while the Meta API returns `PENDING`. In Vartalap we display:
 - `APPROVED` → green badge
 - `PENDING` → **`IN_REVIEW`** (amber badge) for readability/matching Meta UI language
 - `REJECTED` → red badge
@@ -439,7 +439,7 @@ See `backend/.env` for the full list used in local development. Commonly used va
 - **Supabase media**
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`
-  - `SUPABASE_MEDIA_BUCKET` (optional; default `wapilot-media`)
+  - `SUPABASE_MEDIA_BUCKET` (optional; default `vartalap-media`)
 - **Server**
   - `CORS_ORIGIN` (comma-separated)
   - `JSON_BODY_LIMIT` (optional; default `25mb`)
@@ -453,7 +453,7 @@ See `backend/.env` for the full list used in local development. Commonly used va
 - Or increase `JSON_BODY_LIMIT`
 
 ### Template shows “In review” on Meta but “Pending” in API
-- Meta API often returns `PENDING`; WAPilot displays it as `IN_REVIEW` to match Meta UI terminology.
+- Meta API often returns `PENDING`; Vartalap displays it as `IN_REVIEW` to match Meta UI terminology.
 
 ### Contact Book “Products bought” is empty
 - This column counts only bookings whose `service` matches a name in **Settings → Products**.

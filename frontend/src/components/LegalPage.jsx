@@ -26,8 +26,8 @@ export default function LegalPage({ title, lastUpdated, intro, children }) {
         <p className="font-semibold text-slate-900 dark:text-slate-100">Questions?</p>
         <p>
           Email us at{' '}
-          <a href="mailto:support@wapilot.in" className="text-brand-600 hover:text-brand-700 dark:text-brand-400">
-            support@wapilot.in
+          <a href="mailto:support@vartalap.in" className="text-brand-600 hover:text-brand-700 dark:text-brand-400">
+            support@vartalap.in
           </a>{' '}
           or visit our{' '}
           <Link to="/contact" className="text-brand-600 hover:text-brand-700 dark:text-brand-400">

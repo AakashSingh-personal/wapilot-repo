@@ -201,7 +201,7 @@ export async function sendAppointmentConfirmationEmail(appointment) {
     await sendEmail({
       to: full.customer.email,
       subject: `Booking confirmed — ${full.service?.name || 'Appointment'} (${full.appointmentNumber})`,
-      text: `Hi${full.customer.name ? ` ${full.customer.name}` : ''},\n\n${buildConfirmationMessage(full)}\n\n— ${business?.name || 'WAPilot'}`,
+      text: `Hi${full.customer.name ? ` ${full.customer.name}` : ''},\n\n${buildConfirmationMessage(full)}\n\n— ${business?.name || 'Vartalap'}`,
     });
   } catch (e) {
     log('warn', 'appointment_confirmation_email_failed', { message: e.message });

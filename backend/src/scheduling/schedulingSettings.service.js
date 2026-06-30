@@ -3,7 +3,7 @@ import { configuredReminderChannels, isEmailConfigured, isSmsConfigured } from '
 
 export const META_TEMPLATE_SUGGESTIONS = {
   reminder: {
-    name: 'wapilot_appointment_reminder',
+    name: 'vartalap_appointment_reminder',
     category: 'UTILITY',
     language: 'en_US',
     body:
@@ -11,14 +11,14 @@ export const META_TEMPLATE_SUGGESTIONS = {
     variables: ['service', 'when', 'ref', 'label'],
   },
   confirmation: {
-    name: 'wapilot_appointment_confirmed',
+    name: 'vartalap_appointment_confirmed',
     category: 'UTILITY',
     language: 'en_US',
     body: 'Booking confirmed!\n{{1}} on {{2}}\nRef: {{3}}',
     variables: ['service', 'when', 'ref'],
   },
   rebooking: {
-    name: 'wapilot_rebooking_nudge',
+    name: 'vartalap_rebooking_nudge',
     category: 'MARKETING',
     language: 'en_US',
     body:

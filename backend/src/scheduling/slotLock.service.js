@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { getRedisClient } from '../realtime/redisBridge.js';
 import { log } from '../utils/logger.js';
 
-const LOCK_PREFIX = 'wapilot:slot:';
+const LOCK_PREFIX = 'vartalap:slot:';
 const DEFAULT_TTL_SEC = Number(process.env.SLOT_LOCK_TTL_SEC || 30);
 
 function lockKey({ businessId, staffId, startAt }) {

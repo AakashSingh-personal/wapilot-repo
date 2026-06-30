@@ -193,7 +193,7 @@ export default function Payments() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Payments" subtitle="Customer collections and WaPilot subscription" />
+      <PageHeader title="Payments" subtitle="Customer collections and Vartalap subscription" />
 
       {error && (
         <div className="rounded-lg bg-error-50 dark:bg-error-950/40 border border-error-200 dark:border-error-800 text-error-700 dark:text-error-300 text-sm px-4 py-3">
@@ -286,7 +286,7 @@ export default function Payments() {
       {/* ── Subscription payments table ── */}
       <Card>
         <Card.Header
-          title="WaPilot subscription"
+          title="Vartalap subscription"
           subtitle="Your SaaS billing history"
         />
         <DataTable

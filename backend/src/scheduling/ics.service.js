@@ -11,7 +11,7 @@ function escapeIcsText(text) {
 }
 
 export function buildAppointmentIcs(appointment) {
-  const uid = `${appointment.id}@wapilot.app`;
+  const uid = `${appointment.id}@vartalap.app`;
   const summary = `${appointment.service?.name || 'Appointment'} — ${appointment.customer?.name || 'Customer'}`;
   const description = [
     `Ref: ${appointment.appointmentNumber}`,
@@ -25,7 +25,7 @@ export function buildAppointmentIcs(appointment) {
   return [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//WAPilot//Scheduling//EN',
+    'PRODID:-//Vartalap//Scheduling//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',

@@ -121,7 +121,7 @@ function SidebarContent({ collapsed, onNavClick, user, business, theme, toggle, 
             <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center shrink-0">
               <MessageSquare className="w-4 h-4 text-white" />
             </div>
-            <span className="font-bold text-neutral-900 dark:text-neutral-50 text-sm">WaPilot</span>
+            <span className="font-bold text-neutral-900 dark:text-neutral-50 text-sm">Vartalap</span>
           </div>
         )}
         {collapsed && (
@@ -337,7 +337,7 @@ export default function Layout() {
             <div className="w-6 h-6 rounded-md bg-brand-600 flex items-center justify-center">
               <MessageSquare className="w-3.5 h-3.5 text-white" />
             </div>
-            <span className="font-bold text-sm text-neutral-900 dark:text-neutral-50">WaPilot</span>
+            <span className="font-bold text-sm text-neutral-900 dark:text-neutral-50">Vartalap</span>
           </div>
           <button
             type="button"

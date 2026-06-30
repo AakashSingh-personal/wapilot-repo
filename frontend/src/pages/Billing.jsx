@@ -93,7 +93,7 @@ export default function Billing() {
     const options = {
       key: data.keyId,
       currency: data.currency || 'INR',
-      name: 'WaPilot',
+      name: 'Vartalap',
       description: `Upgrade to ${data.plan}`,
       order_id: data.orderId,
       handler: async (resp) => {
@@ -177,7 +177,7 @@ export default function Billing() {
 
   return (
     <div className="space-y-5 max-w-2xl">
-      <PageHeader title="Billing" subtitle="Manage your WaPilot subscription" />
+      <PageHeader title="Billing" subtitle="Manage your Vartalap subscription" />
 
       {error && (
         <div className="flex items-start gap-2.5 rounded-lg bg-error-50 dark:bg-error-950/40 border border-error-200 dark:border-error-800 text-error-700 dark:text-error-300 text-sm px-4 py-3">

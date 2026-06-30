@@ -182,7 +182,7 @@ export async function sendWhatsAppImageFromBuffer({ phoneNumberId, toPhoneE164, 
     return { skipped: true };
   }
 
-  const tmp = path.join(os.tmpdir(), `wapilot-${Date.now()}.png`);
+  const tmp = path.join(os.tmpdir(), `vartalap-${Date.now()}.png`);
   fs.writeFileSync(tmp, buffer);
 
   try {

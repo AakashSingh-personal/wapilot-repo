@@ -1,5 +1,5 @@
 /**
- * WaPilot Recharts theme — consistent chart styling across the app.
+ * Vartalap Recharts theme — consistent chart styling across the app.
  * Usage: import { chartDefaults, chartColors, tooltipStyle } from '@/design-system/chartTheme'
  */
 import { chartPalette, colors } from './tokens.js';

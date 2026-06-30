@@ -40,7 +40,7 @@ const BUILTIN_CATALOG = [
   },
   {
     key: 'wallet_balance',
-    label: 'WAPilot wallet balance (₹)',
+    label: 'Vartalap wallet balance (₹)',
     category: 'PAYMENT',
     namespace: 'business.wallet.balance',
     readOnly: true,

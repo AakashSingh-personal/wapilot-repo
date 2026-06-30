@@ -170,7 +170,7 @@ export default function Home() {
         <div className="text-center space-y-2">
           <h2 className="text-3xl font-bold text-neutral-900 dark:text-neutral-50">Everything in one place</h2>
           <p className="text-neutral-500 dark:text-neutral-400 max-w-xl mx-auto">
-            From first message to paid appointment — WAPilot handles the entire customer journey over WhatsApp.
+            From first message to paid appointment — Vartalap handles the entire customer journey over WhatsApp.
           </p>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">

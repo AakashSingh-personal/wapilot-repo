@@ -1,6 +1,6 @@
 import { log } from '../utils/logger.js';
 
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'wapilot.scheduling';
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'vartalap.scheduling';
 
 const QUEUES = {
   reminders: 'scheduling.tick.reminders',

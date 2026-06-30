@@ -1,0 +1,39 @@
+# Render Blueprint — Vartalap API (free tier)
+# Must live at repository root for Render to apply it.
+# ─────────────────────────────────────────────────────────────────────────────
+# Free-tier constraints:
+#   - 1 web service (512 MB RAM, shared CPU)
+#   - Cold start after 15 min inactivity (new deploys wake immediately)
+#   - No persistent disk — workers run in-process via setInterval
+#   - RabbitMQ: CloudAMQP free (3 concurrent connections, 1M msg/month)
+#   - Neon DB: free (0.5 GB storage, serverless compute)
+#   - Redis: Upstash free (10,000 commands/day)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: vartalap-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm run db:migrate:deploy && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Free-tier connection pool (small to match Neon serverless limits)
+      - key: DB_POOL_MAX
+        value: "3"
+      - key: DB_POOL_MIN
+        value: "0"
+      - key: DB_IDLE_TIMEOUT_MS
+        value: "10000"
+      # Workers run in-process (no separate worker dyno on free)
+      - key: WORKER_ENABLE
+        value: "1"
+      # Redis guard — daily command limit for Upstash free tier
+      - key: REDIS_DAILY_LIMIT
+        value: "9500"
+      # Cloudflare Pages production frontend (add custom domains comma-separated)
+      - key: CORS_ORIGIN
+        value: "https://vartalap.pages.dev"

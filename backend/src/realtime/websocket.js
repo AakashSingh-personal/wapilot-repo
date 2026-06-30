@@ -46,9 +46,9 @@ export function attachRealtimeWebSocket(httpServer) {
 
   const interval = setInterval(() => {
     wss.clients.forEach((ws) => {
-      if (ws.wapilotDead) return;
-      if (ws.wapilotAuthenticated && ws.isAlive === false) {
-        ws.wapilotDead = true;
+      if (ws.vartalapDead) return;
+      if (ws.vartalapAuthenticated && ws.isAlive === false) {
+        ws.vartalapDead = true;
         try {
           ws.terminate();
         } catch {
@@ -69,15 +69,15 @@ export function attachRealtimeWebSocket(httpServer) {
 
   wss.on('connection', (ws) => {
     ws.isAlive = true;
-    ws.wapilotAuthenticated = false;
-    ws.wapilotDead = false;
+    ws.vartalapAuthenticated = false;
+    ws.vartalapDead = false;
 
     ws.on('pong', () => {
       ws.isAlive = true;
     });
 
     const authTimer = setTimeout(() => {
-      if (!ws.wapilotAuthenticated && ws.readyState === 1) {
+      if (!ws.vartalapAuthenticated && ws.readyState === 1) {
         try {
           ws.send(JSON.stringify({ type: EventType.AUTH_ERROR, error: 'auth_timeout' }));
         } catch {
@@ -96,7 +96,7 @@ export function attachRealtimeWebSocket(httpServer) {
       }
       if (!msg || typeof msg !== 'object') return;
 
-      if (!ws.wapilotAuthenticated) {
+      if (!ws.vartalapAuthenticated) {
         if (msg.type !== 'auth' || !msg.token) {
           try {
             ws.send(JSON.stringify({ type: EventType.AUTH_ERROR, error: 'expected_auth' }));
@@ -108,7 +108,7 @@ export function attachRealtimeWebSocket(httpServer) {
         }
         try {
           const auth = verifySocketAuthToken(msg.token);
-          ws.wapilotAuthenticated = true;
+          ws.vartalapAuthenticated = true;
           hub.registerClient(ws, auth);
           clearTimeout(authTimer);
           ws.send(JSON.stringify({ type: EventType.AUTH_OK, businessId: auth.businessId }));
